@@ -1,9 +1,9 @@
 #include "OmniDanaCommon.h"
-#include "FeedbackTask.h"
+#include "fbTask.h"
 
 #define POLLING_TIME_MS     1000
 
-void FeedbackInitialize(MessageBufferHandle msgBuf)
+void FeedbackInitialize(MessageBufferHandle_t msgBuf)
 {
   xTaskCreate(
     FeedbackTask
@@ -17,7 +17,7 @@ void FeedbackInitialize(MessageBufferHandle msgBuf)
 
 void FeedbackTask( void *pvParameters )
 {
-  MessageBufferHandle msgBuf = (MessageBufferHandle)pvParameters;
+  MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
 
   Serial.print("FeedbackTask: msgBuf=");
   Serial.print((unsigned int)msgBuf, HEX);

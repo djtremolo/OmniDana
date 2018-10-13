@@ -1,18 +1,20 @@
 #include "OmniDanaCommon.h"
-//#include "BTReceiverTask.h"
+
+#include "recTask.h"
 
 #define POLLING_TIME_MS     1000
 
 
 
-void BTReceiverTask( void *pvParameters );
+void ReceiverTask( void *pvParameters );
+void ReceiverInitialize(MessageBufferHandle_t msgBuf);
 
 
-void BTReceiverInitialize(MessageBufferHandle msgBuf)
+void ReceiverInitialize(MessageBufferHandle_t msgBuf)
 {
   xTaskCreate(
-    BTReceiverTask
-    ,  (const portCHAR *)"BTReceiverTask"   // A name just for humans
+    ReceiverTask
+    ,  (const portCHAR *)"ReceiverTask"   // A name just for humans
     ,  128  // Stack size
     ,  (void*)msgBuf
     ,  2  // priority
@@ -20,14 +22,14 @@ void BTReceiverInitialize(MessageBufferHandle msgBuf)
 }
 
 
-void BTReceiverTask( void *pvParameters )
+void ReceiverTask( void *pvParameters )
 {
-  MessageBufferHandle msgBuf = (MessageBufferHandle)pvParameters;
+  MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
   uint8_t sendBuf[] = { 0xBE, 0xEF, 0xAB, 0xCD, 0xEF};
   const TickType_t timeout = pdMS_TO_TICKS( 1000 );
 
 
-  Serial.print("BTReceiverTask: msgBuf=");
+  Serial.print("ReceiverTask: msgBuf=");
   Serial.print((unsigned int)msgBuf, HEX);
   Serial.println(".");
 
@@ -38,13 +40,13 @@ void BTReceiverTask( void *pvParameters )
     
     bytesSent = xMessageBufferSend(msgBuf, (void*)sendBuf, len, timeout);
 
-    Serial.print("BTReceiverTask: Sent ");
+    Serial.print("ReceiverTask: Sent ");
     Serial.print(bytesSent, DEC);
     Serial.println(" bytes.");
 
     if ( bytesSent != len )
     {
-      Serial.println("BTReceiverTask: TX BUF FULL");
+      Serial.println("ReceiverTask: TX BUF FULL");
     }
 
 

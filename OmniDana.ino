@@ -1,10 +1,8 @@
-#include <Arduino_FreeRTOS.h>
-#include "message_buffer.h"
 #include "OmniDanaCommon.h"
 
-#include "BTReceiverTask.h"
-#include "ControlTask.h"
-#include "FeedbackTask.h"
+#include "recTask.h"
+#include "ctrlTask.h"
+#include "fbTask.h"
 #include "crc16.h"
 
 /*MACROS*/
@@ -29,8 +27,8 @@ void setup() {
   // Now set up two tasks to run independently.
 
 
-  BTReceiverInitialize(BtToControlBuffer);
-  ControlInitialize(BtToControlBuffer);
+  ReceiverInitialize(BtToControlBuffer);
+  ctrlTaskInitialize(BtToControlBuffer);
 }
 
 void loop()

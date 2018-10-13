@@ -1,8 +1,8 @@
 /*
 CRC16 code copied from: http://www.nongnu.org/avr-libc/user-manual/group__util__crc.html
 */
-
 #include "OmniDanaCommon.h"
+#include "crc16.h"
 
 static uint16_t crc16_update(uint16_t crc, uint8_t a)
 {
