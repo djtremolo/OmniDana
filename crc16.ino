@@ -4,7 +4,7 @@ CRC16 code copied from: http://www.nongnu.org/avr-libc/user-manual/group__util__
 #include "OmniDanaCommon.h"
 #include "crc16.h"
 
-static uint16_t crc16_update(uint16_t crc, uint8_t a)
+uint16_t crc16_update(uint16_t crc, uint8_t a)
 {
     int i;
 

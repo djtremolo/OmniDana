@@ -2,7 +2,7 @@
 #define __BTRECEIVERTASK_H__
 #include "message_buffer.h"
 
-void ReceiverInitialize(MessageBufferHandle_t msgBuf);
+void recTaskInitialize(MessageBufferHandle_t msgBuf, uint8_t priority);
 
 
 #endif//__BTRECEIVERTASK_H__

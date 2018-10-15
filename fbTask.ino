@@ -3,11 +3,11 @@
 
 #define POLLING_TIME_MS     1000
 
-void FeedbackInitialize(MessageBufferHandle_t msgBuf)
+void fbTaskInitialize(MessageBufferHandle_t msgBuf)
 {
   xTaskCreate(
-    FeedbackTask
-    ,  (const portCHAR *)"FeedbackTask"   // A name just for humans
+    fbTask
+    ,  (const portCHAR *)"fbTask"   // A name just for humans
     ,  128  // Stack size
     ,  (void*)msgBuf
     ,  2  // priority
@@ -15,17 +15,17 @@ void FeedbackInitialize(MessageBufferHandle_t msgBuf)
 }
 
 
-void FeedbackTask( void *pvParameters )
+void fbTask( void *pvParameters )
 {
   MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
 
-  Serial.print("FeedbackTask: msgBuf=");
+  Serial.print("fbTask: msgBuf=");
   Serial.print((unsigned int)msgBuf, HEX);
   Serial.println(".");
 
   while(1)
   {
-    Serial.println("FeedbackTask");
+    Serial.println("fbTask");
 
     vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS ); // wait for one second
   }

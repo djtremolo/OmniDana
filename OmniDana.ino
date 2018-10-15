@@ -18,16 +18,16 @@ void setup() {
   Serial.begin(115200);
 
   BtToControlBuffer = xMessageBufferCreate( BT_TO_CONTROL_BUFFER_SIZE );
-
+/*
   Serial.print("setup: BtToControlBuffer= ");
   Serial.print((unsigned int)BtToControlBuffer, HEX);
   Serial.println(".");
-
+*/
 
   // Now set up two tasks to run independently.
 
 
-  ReceiverInitialize(BtToControlBuffer);
+  recTaskInitialize(BtToControlBuffer, 4);
   ctrlTaskInitialize(BtToControlBuffer);
 }
 

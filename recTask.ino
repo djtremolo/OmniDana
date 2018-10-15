@@ -1,55 +1,284 @@
 #include "OmniDanaCommon.h"
-
 #include "recTask.h"
 
-#define POLLING_TIME_MS     1000
+
+#define DEBUG_PRINT             true
+#define POLLING_TIME_MS         10
+#define INCOMING_FRAME_MAX      20
+
+#define MAX_PAYLOAD_LENGTH      16
+#define HEADER_LEN              6
+#define FOOTER_LEN              4
+#define HEADER_BYTES_AFTER_LEN  3
+
+#define MAX_BUF_LEN             (HEADER_LEN+MAX_PAYLOAD_LENGTH+FOOTER_LEN)
+#define MAX_LEN_FIELD           (HEADER_BYTES_AFTER_LEN+MAX_PAYLOAD_LENGTH)
 
 
+typedef enum
+{
+  MSG_STATE_START = 0,
+  MSG_STATE_LEN,
+  MSG_STATE_F1,
+  MSG_STATE_CMD,
+  MSG_STATE_PAYLOAD,
+  MSG_STATE_CRC,
+  MSG_STATE_STOP,
+  MSG_STATE_FINISHED
+} danaFrameState_t;
 
-void ReceiverTask( void *pvParameters );
-void ReceiverInitialize(MessageBufferHandle_t msgBuf);
+
+typedef struct
+{
+  uint8_t buf[INCOMING_FRAME_MAX];
+  uint8_t field_len; 
+  uint8_t currentPosition;
+  danaFrameState_t state;
+  uint8_t stateRoundsLeft;
+  uint16_t crcCalculated;
+  uint16_t crcReceived;
+  bool isReady;
+} danaFrame_t;
 
 
-void ReceiverInitialize(MessageBufferHandle_t msgBuf)
+void recTask( void *pvParameters );
+void recTaskInitialize(MessageBufferHandle_t msgBuf, uint8_t priority);
+
+static void incomingFrameInitialize(danaFrame_t *frame);
+static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
+static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte);
+
+
+void recTaskInitialize(MessageBufferHandle_t msgBuf, uint8_t priority)
 {
   xTaskCreate(
-    ReceiverTask
-    ,  (const portCHAR *)"ReceiverTask"   // A name just for humans
+    recTask
+    ,  (const portCHAR *)"recTask"   // A name just for humans
     ,  128  // Stack size
     ,  (void*)msgBuf
-    ,  2  // priority
+    ,  priority
     ,  NULL );
 }
 
 
-void ReceiverTask( void *pvParameters )
+void recTask( void *pvParameters )
 {
   MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
-  uint8_t sendBuf[] = { 0xBE, 0xEF, 0xAB, 0xCD, 0xEF};
-  const TickType_t timeout = pdMS_TO_TICKS( 1000 );
+  danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
+  danaFrame_t *frame = &myDanaFrame;
 
+  /*start from scratch by resetting the incoming frame handler*/
+  incomingFrameInitialize(frame);
 
-  Serial.print("ReceiverTask: msgBuf=");
-  Serial.print((unsigned int)msgBuf, HEX);
-  Serial.println(".");
-
+  /*start receiving from uart.*/
   while(1)
   {
-    size_t len = 5;
-    size_t bytesSent;
-    
-    bytesSent = xMessageBufferSend(msgBuf, (void*)sendBuf, len, timeout);
+    size_t bytesAvailable = Serial.available();
 
-    Serial.print("ReceiverTask: Sent ");
-    Serial.print(bytesSent, DEC);
-    Serial.println(" bytes.");
-
-    if ( bytesSent != len )
+    /*consume bytes available on uart, but do not go to next frame yet*/
+    while((bytesAvailable--) > 0)
     {
-      Serial.println("ReceiverTask: TX BUF FULL");
+      uint8_t inByte = Serial.read();
+
+      Serial.print(inByte, HEX);
+      Serial.print(" ");
+
+      /*follow frame structure*/
+      incomingFrameFollow(frame, inByte);
+
+      /*when follower has marked the frame complete, let's send it to
+      Control Task*/
+      if(frame->isReady)
+      {
+        /*send full frame (with header+payload+footer) to Control Task*/
+        incomingFrameSendToControlTask(msgBuf, frame);
+
+        /*after sending, let's restart receiving*/
+        incomingFrameInitialize(frame);
+
+        /*done for this frame, exit while loop*/
+        break;
+      }
     }
 
-
-    vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS ); // wait for one second
+    /*delay for some time. It would be better to trig the task at each millisecond tick.*/
+    vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS );
   }
 }
+
+
+
+
+static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame)
+{
+  int ret = 0;
+  uint8_t bytesSent = xMessageBufferSend(msgBuf, (void*)frame->buf, frame->currentPosition, portMAX_DELAY);
+
+#if DEBUG_PRINT
+  Serial.print("sendToControlTask: sent ");
+  Serial.print(bytesSent, DEC);
+  Serial.println(" bytes.");
+#endif
+
+  if(bytesSent != frame->currentPosition)
+  {
+#if DEBUG_PRINT
+    Serial.println("recTask: TX BUF FULL");
+#endif
+    ret = -1;
+  }
+
+  return ret;
+}
+
+
+static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
+{
+  bool error = true;
+
+  if(frame->currentPosition < INCOMING_FRAME_MAX)
+  {
+    /*store byte*/
+    frame->buf[frame->currentPosition++] = inByte;
+
+    switch(frame->state)
+    {
+      case MSG_STATE_START:
+        if(inByte == 0x7E)
+        {
+          if(--(frame->stateRoundsLeft) == 0)
+          {
+            /*last round -> advance to next state*/
+            frame->state = MSG_STATE_LEN;
+            /*no stateRoundsLeft needed for this state*/
+          }
+          error = false;
+        }
+        break;
+
+      case MSG_STATE_LEN:
+        if(inByte <= MAX_LEN_FIELD)
+        {
+          frame->field_len = inByte;
+
+          /*advance to next state*/
+          frame->state = MSG_STATE_F1;
+          /*no stateRoundsLeft needed for this state*/
+
+          /*ok!*/
+          error = false;
+        }
+        break;
+
+      case MSG_STATE_F1:
+        if(inByte == 0xF1)
+        {
+          /*append in CRC*/
+          frame->crcCalculated = crc16_update(frame->crcCalculated, inByte);
+
+          /*advance to next state*/
+          frame->state = MSG_STATE_CMD;
+          frame->stateRoundsLeft = 2;
+
+          /*ok!*/
+          error = false;
+        }
+        break;
+
+      case MSG_STATE_CMD:
+        /*append in CRC*/
+        frame->crcCalculated = crc16_update(frame->crcCalculated, inByte);
+
+        if(--(frame->stateRoundsLeft) == 0)
+        {
+          /*last round -> advance to next state*/
+          frame->state = MSG_STATE_PAYLOAD;
+          frame->stateRoundsLeft = frame->field_len - HEADER_BYTES_AFTER_LEN;
+        }
+        error = false;
+        break;
+
+      case MSG_STATE_PAYLOAD:
+        /*append in CRC*/
+        frame->crcCalculated = crc16_update(frame->crcCalculated, inByte);
+
+        if(--(frame->stateRoundsLeft) == 0)
+        {
+          /*last round -> advance to next state*/
+          frame->state = MSG_STATE_CRC;
+          frame->stateRoundsLeft = 2;
+        }
+        error = false;
+        break;
+
+      case MSG_STATE_CRC:
+        /*store the incoming CRC in two parts.
+        On first byte, the crcReceived==0, so shifting does not matter. We just or the low part.
+        On second byte, we shift left and OR with low part.*/
+        frame->crcReceived <<= 8;
+        frame->crcReceived |= inByte;
+
+        /*let's assume the receiving will be OK*/
+        error = false;
+
+        if(--(frame->stateRoundsLeft) == 0)
+        {
+          if(frame->crcReceived == frame->crcCalculated)
+          {
+            /*Checksum OK!*/
+            /*last round -> advance to next state*/
+            frame->state = MSG_STATE_STOP;
+            frame->stateRoundsLeft = 2;
+          }
+          else
+          {
+            /*CRC failed - drop frame*/
+            error = true;
+          }
+        }
+        break;
+
+      case MSG_STATE_STOP:
+        if(inByte == 0x2E)
+        {
+          if(--(frame->stateRoundsLeft) == 0)
+          {
+            /*last round -> advance to next state*/
+            frame->state = MSG_STATE_FINISHED;
+            /*no stateRoundsLeft needed for this state*/
+
+            /*mark frame ready to be sent to ControlTask*/
+            frame->isReady = true;
+          }
+          error = false;
+        }
+        break;
+
+      case MSG_STATE_FINISHED:
+        /*idle... we shouldn't get here at anytime, but it wouldn't be an error.
+        We just drop all the bytes.*/
+        error = false;
+        break;
+
+      default:
+        /*out of sync*/
+        break;
+    }
+  }
+
+  if(error)
+  {
+    /*restart listening from start*/
+    incomingFrameInitialize(frame);
+  }
+}
+
+static void incomingFrameInitialize(danaFrame_t *frame)
+{
+  memset(frame, 0, sizeof(danaFrame_t));
+
+  frame->state = MSG_STATE_START;
+  frame->stateRoundsLeft = 2;
+}
+
+
