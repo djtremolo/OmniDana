@@ -54,10 +54,6 @@ void ctrlTask( void *pvParameters )
 {
   MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
 
-  Serial.print("ctrlTask: msgBuf=");
-  Serial.print((unsigned int)msgBuf, HEX);
-  Serial.println(".");
-
   IoInterfaceSetupPins();
 
   while(1)
@@ -75,8 +71,3 @@ void ctrlTask( void *pvParameters )
     }
   }
 }
-
-
-
-
-

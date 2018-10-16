@@ -1,5 +1,6 @@
 #include "OmniDanaCommon.h"
 #include "recTask.h"
+#include "util/crc16.h"
 
 
 #define DEBUG_PRINT             true
@@ -174,7 +175,7 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
         if(inByte == 0xF1)
         {
           /*append in CRC*/
-          frame->crcCalculated = crc16_update(frame->crcCalculated, inByte);
+          frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
 
           /*advance to next state*/
           frame->state = MSG_STATE_CMD;
@@ -187,7 +188,7 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
 
       case MSG_STATE_CMD:
         /*append in CRC*/
-        frame->crcCalculated = crc16_update(frame->crcCalculated, inByte);
+        frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
 
         if(--(frame->stateRoundsLeft) == 0)
         {
@@ -200,7 +201,7 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
 
       case MSG_STATE_PAYLOAD:
         /*append in CRC*/
-        frame->crcCalculated = crc16_update(frame->crcCalculated, inByte);
+        frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
 
         if(--(frame->stateRoundsLeft) == 0)
         {

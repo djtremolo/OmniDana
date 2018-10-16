@@ -3,7 +3,6 @@
 #include "recTask.h"
 #include "ctrlTask.h"
 #include "fbTask.h"
-#include "crc16.h"
 
 /*MACROS*/
 #define BT_TO_CONTROL_BUFFER_SIZE 101
@@ -19,7 +18,7 @@ void setup() {
 
   BtToControlBuffer = xMessageBufferCreate( BT_TO_CONTROL_BUFFER_SIZE );
 
- // recTaskInitialize(BtToControlBuffer, 2);
+  recTaskInitialize(BtToControlBuffer, 2);
   ctrlTaskInitialize(BtToControlBuffer, 3);
 }
 
