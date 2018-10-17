@@ -36,6 +36,9 @@ const uint8_t GPIOFeedbackMapping[FB_MAX] =
 
 static void setupFeedbackPin(feedbackKey_t fb);
 static void setupButtonPin(buttonKey_t key);
+static void setPinTriState(uint8_t ioPin);
+static void setPinHigh(uint8_t ioPin);
+static void setPinLow(uint8_t ioPin);
 
 bool IoInterfaceReadFeedbackPin(feedbackKey_t fb);
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value);
@@ -84,6 +87,28 @@ bool IoInterfaceReadFeedbackPin(feedbackKey_t fb)
   return state;
 }
 
+static void setPinHigh(uint8_t ioPin)
+{
+  vTaskSuspendAll();
+  digitalWrite(ioPin, HIGH); /*set state / disable pull-up, depending on the pin mode*/
+  pinMode(ioPin, OUTPUT);  /*force low by default*/
+  xTaskResumeAll();
+}
+static void setPinLow(uint8_t ioPin)
+{
+  vTaskSuspendAll();
+  digitalWrite(ioPin, LOW); /*set state / disable pull-up, depending on the pin mode*/
+  pinMode(ioPin, OUTPUT);  /*force low by default*/  
+  xTaskResumeAll();
+}
+static void setPinTriState(uint8_t ioPin)
+{
+  vTaskSuspendAll();
+  digitalWrite(ioPin, LOW); /*make sure driving and pull-up are disabled*/
+  pinMode(ioPin, INPUT);    /*set to input to enable HI-Z mode*/
+  xTaskResumeAll();
+}
+
 static void setupButtonPin(buttonKey_t key)
 {
   if(key >= KEY_MAX)
@@ -91,23 +116,18 @@ static void setupButtonPin(buttonKey_t key)
 
   uint8_t ioPin = GPIOKeyMapping[key];
 
-  #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
-    #if KEY_HIZ_MODE
-    digitalWrite(ioPin, LOW); /*make sure driving and pull-up are disabled*/
-    pinMode(ioPin, INPUT);    /*set to input to enable HI-Z mode*/
-    #else
-    digitalWrite(ioPin, LOW); /*set state / disable pull-up, depending on the pin mode*/
-    pinMode(ioPin, OUTPUT);  /*force low by default*/  
-    #endif
+  #if KEY_HIZ_MODE
+    setPinTriState(ioPin);
   #else
-    #if KEY_HIZ_MODE
-    digitalWrite(ioPin, LOW); /*make sure driving and pull-up are disabled*/
-    pinMode(ioPin, INPUT);    /*set to input to enable HI-Z mode*/
+    #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
+    setPinLow(ioPin);
     #else
-    digitalWrite(ioPin, HIGH); /*set state / disable pull-up, depending on the pin mode*/
-    pinMode(ioPin, OUTPUT);  /*force low by default*/  
+    setPinHigh(ioPin);
     #endif
   #endif
+
+  // The operation is complete.  Restart the RTOS kernel.
+  xTaskResumeAll();
 }
 
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value)
@@ -116,50 +136,29 @@ void IoInterfaceSetButtonPin(buttonKey_t key, bool value)
     return;
 
   uint8_t ioPin = GPIOKeyMapping[key];
+
   switch(value)
   {
-    case false:
-      #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
-        #if KEY_HIZ_MODE
-        /*put in HI-Z mode: first, disable pull-up*/
-        digitalWrite(ioPin, LOW);
-        /*and enter in input mode*/
-        pinMode(ioPin, INPUT);
-        #else
-        digitalWrite(ioPin, LOW);
-        #endif
+    case false:   /*normal / nonactive state*/
+      #if KEY_HIZ_MODE
+        setPinTriState(ioPin);
       #else
-        #if KEY_HIZ_MODE
-        /*put in HI-Z mode: first, disable pull-up*/
-        digitalWrite(ioPin, LOW);
-        /*and enter in input mode*/
-        pinMode(ioPin, INPUT);
+        #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
+        setPinLow(ioPin);
         #else
-        digitalWrite(ioPin, HIGH);
+        setPinHigh(ioPin);
         #endif
       #endif
       break;
 
     default:
-      #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
-        #if KEY_HIZ_MODE
-        /*put in HI-Z mode: first, disable pull-up*/
-        digitalWrite(ioPin, LOW);
-        /*enter in output mode*/
-        pinMode(ioPin, OUTPUT);
-        /*and set output high*/
-        digitalWrite(ioPin, HIGH);
-        #else
-        digitalWrite(ioPin, HIGH);
-        #endif
+      #if KEY_HIZ_MODE
+        setPinTriState(ioPin);
       #else
-        #if KEY_HIZ_MODE
-        /*put in HI-Z mode: first, disable pull-up*/
-        digitalWrite(ioPin, LOW);
-        /*and enter in input mode*/
-        pinMode(ioPin, OUTPUT);
+        #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
+        setPinHigh(ioPin);
         #else
-        digitalWrite(ioPin, LOW);
+        setPinLow(ioPin);
         #endif
       #endif
       break;
