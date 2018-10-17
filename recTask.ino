@@ -1,4 +1,4 @@
-#include "OmniDanaCommon.h"
+#include "common.h"
 #include "recTask.h"
 #include "util/crc16.h"
 

@@ -1,4 +1,4 @@
-#include "OmniDanaCommon.h"
+#include "common.h"
 #include "ctrlTask.h"
 #include "ioInterface.h"
 

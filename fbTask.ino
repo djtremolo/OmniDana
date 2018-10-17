@@ -1,4 +1,4 @@
-#include "OmniDanaCommon.h"
+#include "common.h"
 #include "fbTask.h"
 
 #define POLLING_TIME_MS     1000
