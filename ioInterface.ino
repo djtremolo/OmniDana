@@ -18,6 +18,13 @@
 
 #define KEY_HIZ_MODE            true
 
+typedef enum 
+{
+  PIN_STATE_DRIVE_LOW = false,
+  PIN_STATE_DRIVE_HIGH = true,
+  PIN_STATE_TRISTATE = 3
+} pinState_t;
+
 const uint8_t GPIOKeyMapping[KEY_MAX] = 
 {
   PIN_D2,   //KEY_F1
@@ -36,9 +43,7 @@ const uint8_t GPIOFeedbackMapping[FB_MAX] =
 
 static void setupFeedbackPin(feedbackKey_t fb);
 static void setupButtonPin(buttonKey_t key);
-static void setPinTriState(uint8_t ioPin);
-static void setPinHigh(uint8_t ioPin);
-static void setPinLow(uint8_t ioPin);
+static void setPinState(uint8_t ioPin, pinState_t state);
 
 bool IoInterfaceReadFeedbackPin(feedbackKey_t fb);
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value);
@@ -87,27 +92,29 @@ bool IoInterfaceReadFeedbackPin(feedbackKey_t fb)
   return state;
 }
 
-static void setPinHigh(uint8_t ioPin)
+
+
+static void setPinState(uint8_t ioPin, pinState_t state)
 {
   vTaskSuspendAll();
-  digitalWrite(ioPin, HIGH); /*set state / disable pull-up, depending on the pin mode*/
-  pinMode(ioPin, OUTPUT);  /*force low by default*/
+  switch(state)
+  {
+    case PIN_STATE_DRIVE_LOW:
+      digitalWrite(ioPin, LOW);
+      pinMode(ioPin, OUTPUT);
+      break;  
+    case PIN_STATE_DRIVE_HIGH:
+      digitalWrite(ioPin, HIGH);
+      pinMode(ioPin, OUTPUT);
+      break;
+    default:
+      digitalWrite(ioPin, LOW); /*make sure driving and pull-up are disabled*/
+      pinMode(ioPin, INPUT);    /*set to input to enable HI-Z mode*/
+      break;
+  }
   xTaskResumeAll();
 }
-static void setPinLow(uint8_t ioPin)
-{
-  vTaskSuspendAll();
-  digitalWrite(ioPin, LOW); /*set state / disable pull-up, depending on the pin mode*/
-  pinMode(ioPin, OUTPUT);  /*force low by default*/  
-  xTaskResumeAll();
-}
-static void setPinTriState(uint8_t ioPin)
-{
-  vTaskSuspendAll();
-  digitalWrite(ioPin, LOW); /*make sure driving and pull-up are disabled*/
-  pinMode(ioPin, INPUT);    /*set to input to enable HI-Z mode*/
-  xTaskResumeAll();
-}
+
 
 static void setupButtonPin(buttonKey_t key)
 {
@@ -117,17 +124,14 @@ static void setupButtonPin(buttonKey_t key)
   uint8_t ioPin = GPIOKeyMapping[key];
 
   #if KEY_HIZ_MODE
-    setPinTriState(ioPin);
+    setPinState(ioPin, PIN_STATE_TRISTATE);
   #else
     #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
-    setPinLow(ioPin);
+    setPinState(ioPin, PIN_STATE_DRIVE_LOW);
     #else
-    setPinHigh(ioPin);
+    setPinState(ioPin, PIN_STATE_DRIVE_HIGH);
     #endif
   #endif
-
-  // The operation is complete.  Restart the RTOS kernel.
-  xTaskResumeAll();
 }
 
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value)
@@ -141,25 +145,21 @@ void IoInterfaceSetButtonPin(buttonKey_t key, bool value)
   {
     case false:   /*normal / nonactive state*/
       #if KEY_HIZ_MODE
-        setPinTriState(ioPin);
+        setPinState(ioPin, PIN_STATE_TRISTATE);
       #else
         #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
-        setPinLow(ioPin);
+        setPinState(ioPin, PIN_STATE_DRIVE_LOW);
         #else
-        setPinHigh(ioPin);
+        setPinState(ioPin, PIN_STATE_DRIVE_HIGH);
         #endif
       #endif
       break;
 
-    default:
-      #if KEY_HIZ_MODE
-        setPinTriState(ioPin);
+    default:  /*active state*/
+      #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
+      setPinState(ioPin, PIN_STATE_DRIVE_HIGH);
       #else
-        #if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
-        setPinHigh(ioPin);
-        #else
-        setPinLow(ioPin);
-        #endif
+      setPinState(ioPin, PIN_STATE_DRIVE_LOW);
       #endif
       break;
   }
