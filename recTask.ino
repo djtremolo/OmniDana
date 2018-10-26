@@ -39,32 +39,33 @@ typedef struct
   uint16_t crcCalculated;
   uint16_t crcReceived;
   bool isReady;
+  bool isBusy;
 } danaFrame_t;
 
 
 void recTask( void *pvParameters );
-void recTaskInitialize(MessageBufferHandle_t msgBuf, uint8_t priority);
+void recTaskInitialize(OmniDanaContext_t *ctx);
 
 static void incomingFrameInitialize(danaFrame_t *frame);
 static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte);
 
 
-void recTaskInitialize(MessageBufferHandle_t msgBuf, uint8_t priority)
+void recTaskInitialize(OmniDanaContext_t *ctx)
 {
   xTaskCreate(
     recTask
     ,  (const portCHAR *)"recTask"   // A name just for humans
     ,  128  // Stack size
-    ,  (void*)msgBuf
-    ,  priority
+    ,  (void*)ctx
+    ,  REC_TASK_PRIORITY
     ,  NULL );
 }
 
 
 void recTask( void *pvParameters )
 {
-  MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
+  OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
   danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
   danaFrame_t *frame = &myDanaFrame;
 
@@ -74,6 +75,20 @@ void recTask( void *pvParameters )
   /*start receiving from uart.*/
   while(1)
   {
+    /*Phase 1: if receiver is not busy, send if commTask has something to send*/
+    if(frame->isBusy == false)
+    {
+      uint8_t txMsg[INCOMING_FRAME_MAX];
+      
+      size_t txLen = xMessageBufferReceive(ctx->commToRecBuffer, (void*)txMsg, sizeof(txMsg), 0);
+      if(txLen > 0)
+      {
+        size_t sentBytes;
+        sentBytes = Serial.write(txMsg, txLen);
+      }
+    }
+    
+    /*Phase 2: receive if there's something to receive*/
     size_t bytesAvailable = Serial.available();
 
     /*consume bytes available on uart, but do not go to next frame yet*/
@@ -81,8 +96,8 @@ void recTask( void *pvParameters )
     {
       uint8_t inByte = Serial.read();
 
-      Serial.print(inByte, HEX);
-      Serial.print(" ");
+    //  Serial.print(inByte, HEX);
+    //  Serial.print(" ");
 
       /*follow frame structure*/
       incomingFrameFollow(frame, inByte);
@@ -92,7 +107,7 @@ void recTask( void *pvParameters )
       if(frame->isReady)
       {
         /*send full frame (with header+payload+footer) to Control Task*/
-        incomingFrameSendToControlTask(msgBuf, frame);
+        incomingFrameSendToControlTask(ctx->recToCommBuffer, frame);
 
         /*after sending, let's restart receiving*/
         incomingFrameInitialize(frame);
@@ -147,6 +162,9 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
       case MSG_STATE_START:
         if(inByte == 0x7E)
         {
+          /*receiving started - mark busy to disable sender*/
+          frame->isBusy = true;
+
           if(--(frame->stateRoundsLeft) == 0)
           {
             /*last round -> advance to next state*/

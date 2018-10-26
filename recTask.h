@@ -2,7 +2,7 @@
 #define __BTRECEIVERTASK_H__
 #include "message_buffer.h"
 
-void recTaskInitialize(MessageBufferHandle_t msgBuf, uint8_t priority);
+void recTaskInitialize(OmniDanaContext_t *ctx);
 
 
 #endif//__BTRECEIVERTASK_H__

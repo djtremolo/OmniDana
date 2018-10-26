@@ -12,14 +12,15 @@ typedef enum
   KEY_HOME,
   KEY_UP,
   KEY_DOWN,
+  KEY_QUESTIONMARK,
   /****/
-  KEY_MAX
+  KEY_MAX,
+  KEY_NONE  /*used for checking if ctrlTask is actively pushing a button or not*/
 } buttonKey_t;
 
 typedef enum 
 {
   FB_BEEP = 0,
-  FB_BACKLIGHT,
   /****/
   FB_MAX
 } feedbackKey_t;

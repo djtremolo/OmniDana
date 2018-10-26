@@ -3,25 +3,21 @@
 
 #define POLLING_TIME_MS     1000
 
-void fbTaskInitialize(MessageBufferHandle_t msgBuf)
+void fbTaskInitialize(OmniDanaContext_t *ctx)
 {
   xTaskCreate(
     fbTask
     ,  (const portCHAR *)"fbTask"   // A name just for humans
     ,  128  // Stack size
-    ,  (void*)msgBuf
-    ,  2  // priority
+    ,  (void*)ctx
+    ,  FB_TASK_PRIORITY  // priority
     ,  NULL );
 }
 
 
 void fbTask( void *pvParameters )
 {
-  MessageBufferHandle_t msgBuf = (MessageBufferHandle_t)pvParameters;
-
-  Serial.print("fbTask: msgBuf=");
-  Serial.print((unsigned int)msgBuf, HEX);
-  Serial.println(".");
+  OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
 
   while(1)
   {

@@ -32,13 +32,13 @@ const uint8_t GPIOKeyMapping[KEY_MAX] =
   PIN_D4,   //KEY_F3
   PIN_D5,   //KEY_HOME
   PIN_A0,   //KEY_UP
-  PIN_A1    //KEY_DOWN
+  PIN_A1,   //KEY_DOWN
+  PIN_A2    //KEY_QUESTIONMARK
 };
 
 const uint8_t GPIOFeedbackMapping[FB_MAX] = 
 {
-  PIN_A2,   //FB_BEEP
-  PIN_A3    //FB_BACKLIGHT
+  PIN_A2   //FB_BEEP
 };
 
 static void setupFeedbackPin(feedbackKey_t fb);

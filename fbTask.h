@@ -1,7 +1,7 @@
 #ifndef __FEEDBACKTASK_H__
 #define __FEEDBACKTASK_H__
 
-void fbTaskInitialize(MessageBufferHandle_t msgBuf);
+void fbTaskInitialize(OmniDanaContext_t *ctx);
 void fbTask( void *pvParameters );
 
 
