@@ -50,14 +50,31 @@ void ctrlTask(void *pvParameters)
 
   while(1)
   {
-    uint8_t msg[MAX_BUF_LEN];
-    size_t receivedBytes;
+    DanaMessage_t dMsg;
 
-    receivedBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void*)msg, sizeof(msg), portMAX_DELAY);
+    int recBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void*)&dMsg, sizeof(DanaMessage_t), portMAX_DELAY);
 
+    if(recBytes == sizeof(DanaMessage_t))
+    {
+      handleDanaCommand(ctx, &dMsg);
+
+    }
 
     /*and continue waiting for next...*/
   }
+}
+
+
+static int handleDanaCommand(OmniDanaContext_t *ctx, DanaMessage_t *dMsg)
+{
+  int ret = -1;
+  switch(dMsg->cmd)
+  {
+    default:
+      //Serial.println("handleDanaCommand: unknown command");
+      break;
+  }
+  return ret;
 }
 
 

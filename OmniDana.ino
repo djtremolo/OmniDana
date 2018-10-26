@@ -15,6 +15,8 @@ void setup() {
 
   Serial.begin(115200);
 
+  pinMode(LED_BUILTIN, OUTPUT);
+
   memset(&odContext, 0, sizeof(OmniDanaContext_t));
 
   odContext.commToRecBuffer = xMessageBufferCreate( COMM_TO_REC_BUFFER_SIZE );
@@ -22,9 +24,9 @@ void setup() {
   odContext.commToCtrlBuffer = xMessageBufferCreate( COMM_TO_CTRL_BUFFER_SIZE );
   odContext.fbToCtrlBuffer = xMessageBufferCreate( FB_TO_CTRL_BUFFER_SIZE );
 
-  commTaskInitialize(&odContext);
-  ctrlTaskInitialize(&odContext);
-  fbTaskInitialize(&odContext);
+ // commTaskInitialize(&odContext);
+ // ctrlTaskInitialize(&odContext);
+ // fbTaskInitialize(&odContext);
   uartTaskInitialize(&odContext);
 }
 

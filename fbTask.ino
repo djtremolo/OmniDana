@@ -21,7 +21,7 @@ void fbTask(void *pvParameters)
 
   while(1)
   {
-    Serial.println("fbTask");
+    //Serial.println("fbTask");
 
     vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS ); // wait for one second
   }

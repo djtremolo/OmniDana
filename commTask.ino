@@ -45,16 +45,16 @@ void commTask(void *pvParameters)
 
     if(receivedBytes > 0 )
     { 
-      Serial.print("commTask received ");
-      Serial.print(receivedBytes, DEC);
-      Serial.println(" bytes.");
+      //Serial.print("commTask received ");
+      //Serial.print(receivedBytes, DEC);
+      //Serial.println(" bytes.");
     }
 
     /*handle received message*/
     if(handleLowLevelMessage(ctx, &msg[0], receivedBytes))
     {
       /*failed*/
-      Serial.println("handleLowLevelMessage failed!");
+      //Serial.println("handleLowLevelMessage failed!");
     }
 
     /*and continue waiting for next...*/

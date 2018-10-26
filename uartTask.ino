@@ -6,7 +6,7 @@
 #define STOP_CHAR                   0x5A
 
 #define DEBUG_PRINT                 false
-#define POLLING_TIME_MS             10
+#define POLLING_TIME_MS             100
 
 #define IDLE_COUNTER_MAX            100
 
@@ -49,14 +49,19 @@ static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg);
 
 void uartTaskInitialize(OmniDanaContext_t *ctx)
 {
+  Serial.println("uartTask: starting");
+
   xTaskCreate(
     uartTask
     ,  (const portCHAR *)"uartTask"   // A name just for humans
-    ,  128  // Stack size
+    ,  256  // Stack size
     ,  (void*)ctx
     ,  UART_TASK_PRIORITY
     ,  NULL );
 }
+
+bool ledState = false;
+int cntr = 0;
 
 static void uartTask(void *pvParameters)
 {
@@ -83,6 +88,7 @@ static void uartTask(void *pvParameters)
     {
       vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS );
     }
+
   }
 }
 
@@ -130,6 +136,14 @@ static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
   while((bytesAvailable--) > 0)
   {
     uint8_t inByte = Serial.read();
+
+//    digitalWrite(LED_BUILTIN, ledState);
+//    ledState = !ledState;
+
+
+Serial.print(inByte, HEX);
+
+
 
     /*follow frame structure*/
     incomingFrameFollow(frame, inByte);
