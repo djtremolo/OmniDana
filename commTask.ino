@@ -6,8 +6,6 @@
 #define FOOTER_LEN          4
 #define MAX_BUF_LEN         (HEADER_LEN+MAX_PAYLOAD_LENGTH+FOOTER_LEN)
 
-#define START_CHAR          0x7E
-#define STOP_CHAR           0x2E
 
 
 typedef enum
@@ -35,7 +33,7 @@ void commTaskInitialize(OmniDanaContext_t *ctx)
 
 
 
-void commTask( void *pvParameters )
+void commTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
   uint8_t msg[20];
@@ -64,33 +62,17 @@ void commTask( void *pvParameters )
 }
 
 
+// A5 A5 LEN TYPE CODE PARAMS CHECKSUM1 CHECKSUM2 5A 5A
+//           ^---- LEN -----^
+// total packet length 2 + 1 + readBuffer[2] + 2 + 2
 
 static int handleLowLevelMessage(OmniDanaContext_t *ctx, uint8_t *buf, size_t bufLen)
 {
-  int ret = -1;
-  
-  /*sanity check*/
-  if((buf[0] == START_CHAR) && (buf[1] == START_CHAR))
-  {
-    if(buf[3] == 0xF1)    /*fixed byte*/
-    {
-      uint8_t payloadLen = buf[2] - 3;
-      uint8_t *payload = &buf[6];
-      uint16_t cmd = (buf[4]<<8 | buf[5]);
+  uint8_t payloadLen = buf[2] - 2;
+  uint8_t *payload = &buf[5];
+  uint16_t cmd = (buf[3]<<8 | buf[4]);
 
-      uint8_t footerOffset = payloadLen + 3;   /*crc hi*/
-
-      if(bufLen >= (payloadLen +6))
-      {
-        if((buf[footerOffset+2] == STOP_CHAR) && (buf[footerOffset+3] == STOP_CHAR))
-        {
-          ret = handlePayload(ctx, cmd, payload, payloadLen);
-        }
-      }
-    }
-  }
-
-  return ret;
+  return handlePayload(ctx, cmd, payload, payloadLen);
 }
 
 static int handlePayload(OmniDanaContext_t *ctx, uint16_t cmd, uint8_t *buf, uint8_t len)

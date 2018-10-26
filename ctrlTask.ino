@@ -42,7 +42,7 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
 
 
 
-void ctrlTask( void *pvParameters )
+void ctrlTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
 

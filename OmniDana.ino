@@ -1,6 +1,6 @@
 #include "common.h"
 
-#include "recTask.h"
+#include "uartTask.h"
 #include "ctrlTask.h"
 #include "fbTask.h"
 #include "commTask.h"
@@ -25,7 +25,7 @@ void setup() {
   commTaskInitialize(&odContext);
   ctrlTaskInitialize(&odContext);
   fbTaskInitialize(&odContext);
-  recTaskInitialize(&odContext);
+  uartTaskInitialize(&odContext);
 }
 
 void loop()

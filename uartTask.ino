@@ -1,6 +1,11 @@
 #include "common.h"
-#include "recTask.h"
+#include "uartTask.h"
 #include "util/crc16.h"
+
+#define START_CHAR          0xA5
+#define STOP_CHAR           0x5A
+
+
 
 
 #define DEBUG_PRINT             true
@@ -20,7 +25,6 @@ typedef enum
 {
   MSG_STATE_START = 0,
   MSG_STATE_LEN,
-  MSG_STATE_F1,
   MSG_STATE_CMD,
   MSG_STATE_PAYLOAD,
   MSG_STATE_CRC,
@@ -43,27 +47,85 @@ typedef struct
 } danaFrame_t;
 
 
-void recTask( void *pvParameters );
-void recTaskInitialize(OmniDanaContext_t *ctx);
+void uartTask(void *pvParameters);
+void uartTaskInitialize(OmniDanaContext_t *ctx);
 
+static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
+static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
 static void incomingFrameInitialize(danaFrame_t *frame);
-static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
+static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte);
 
 
-void recTaskInitialize(OmniDanaContext_t *ctx)
+void uartTaskInitialize(OmniDanaContext_t *ctx)
 {
   xTaskCreate(
-    recTask
-    ,  (const portCHAR *)"recTask"   // A name just for humans
+    uartTask
+    ,  (const portCHAR *)"uartTask"   // A name just for humans
     ,  128  // Stack size
     ,  (void*)ctx
-    ,  REC_TASK_PRIORITY
+    ,  UART_TASK_PRIORITY
     ,  NULL );
 }
 
 
-void recTask( void *pvParameters )
+static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
+{
+  bool ret = false;
+
+  if(frame->isBusy == false)
+  {
+    uint8_t txMsg[INCOMING_FRAME_MAX];
+    
+    size_t txLen = xMessageBufferReceive(ctx->commToRecBuffer, (void*)txMsg, sizeof(txMsg), 0);
+    if(txLen > 0)
+    {
+      size_t sentBytes;
+      sentBytes = Serial.write(txMsg, txLen);
+      ret = true;
+    }
+  }
+
+  return ret;
+}
+
+static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
+{
+  bool ret = false;
+
+  size_t bytesAvailable = Serial.available();
+
+  /*consume bytes available on uart, but do not go to next frame yet*/
+  while((bytesAvailable--) > 0)
+  {
+    uint8_t inByte = Serial.read();
+
+    /*follow frame structure*/
+    incomingFrameFollow(frame, inByte);
+
+    /*when follower has marked the frame complete, let's send it to
+    commTask*/
+    if(frame->isReady)
+    {
+      /*send full frame (with header+payload+footer) to commTask*/
+      incomingFrameSendToCommTask(ctx->recToCommBuffer, frame);
+
+      /*after sending, let's restart receiving*/
+      incomingFrameInitialize(frame);
+
+      /*return true when we finished with something. This will cause the task to rest for a while.*/
+      ret = true;
+
+      /*done for this frame, exit while loop*/
+      break;
+    }
+  }
+  return ret;
+}
+
+
+
+void uartTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
   danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
@@ -75,63 +137,32 @@ void recTask( void *pvParameters )
   /*start receiving from uart.*/
   while(1)
   {
+    bool somethingHappened = false;
+
     /*Phase 1: if receiver is not busy, send if commTask has something to send*/
-    if(frame->isBusy == false)
-    {
-      uint8_t txMsg[INCOMING_FRAME_MAX];
-      
-      size_t txLen = xMessageBufferReceive(ctx->commToRecBuffer, (void*)txMsg, sizeof(txMsg), 0);
-      if(txLen > 0)
-      {
-        size_t sentBytes;
-        sentBytes = Serial.write(txMsg, txLen);
-      }
-    }
-    
+    somethingHappened |= sendToAAPS(ctx, frame);
+
     /*Phase 2: receive if there's something to receive*/
-    size_t bytesAvailable = Serial.available();
+    somethingHappened |= receiveFromAAPS(ctx, frame);
 
-    /*consume bytes available on uart, but do not go to next frame yet*/
-    while((bytesAvailable--) > 0)
+    /*If nothing happened, let's rest a bit.*/
+    if(!somethingHappened)
     {
-      uint8_t inByte = Serial.read();
-
-    //  Serial.print(inByte, HEX);
-    //  Serial.print(" ");
-
-      /*follow frame structure*/
-      incomingFrameFollow(frame, inByte);
-
-      /*when follower has marked the frame complete, let's send it to
-      Control Task*/
-      if(frame->isReady)
-      {
-        /*send full frame (with header+payload+footer) to Control Task*/
-        incomingFrameSendToControlTask(ctx->recToCommBuffer, frame);
-
-        /*after sending, let's restart receiving*/
-        incomingFrameInitialize(frame);
-
-        /*done for this frame, exit while loop*/
-        break;
-      }
+      vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS );
     }
-
-    /*delay for some time. It would be better to trig the task at each millisecond tick.*/
-    vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS );
   }
 }
 
 
 
 
-static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame)
+static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame)
 {
   int ret = 0;
   uint8_t bytesSent = xMessageBufferSend(msgBuf, (void*)frame->buf, frame->currentPosition, portMAX_DELAY);
 
 #if DEBUG_PRINT
-  Serial.print("sendToControlTask: sent ");
+  Serial.print("incomingFrameSendToCommTask: sent ");
   Serial.print(bytesSent, DEC);
   Serial.println(" bytes.");
 #endif
@@ -139,7 +170,7 @@ static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFram
   if(bytesSent != frame->currentPosition)
   {
 #if DEBUG_PRINT
-    Serial.println("recTask: TX BUF FULL");
+    Serial.println("uartTask: TX BUF FULL");
 #endif
     ret = -1;
   }
@@ -147,6 +178,9 @@ static int incomingFrameSendToControlTask(MessageBufferHandle_t msgBuf, danaFram
   return ret;
 }
 
+// A5 A5 LEN TYPE CODE PARAMS CHECKSUM1 CHECKSUM2 5A 5A
+//           ^---- LEN -----^
+// total packet length 2 + 1 + readBuffer[2] + 2 + 2
 
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
 {
@@ -160,7 +194,7 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
     switch(frame->state)
     {
       case MSG_STATE_START:
-        if(inByte == 0x7E)
+        if(inByte == START_CHAR)
         {
           /*receiving started - mark busy to disable sender*/
           frame->isBusy = true;
@@ -179,21 +213,6 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
         if(inByte <= MAX_LEN_FIELD)
         {
           frame->field_len = inByte;
-
-          /*advance to next state*/
-          frame->state = MSG_STATE_F1;
-          /*no stateRoundsLeft needed for this state*/
-
-          /*ok!*/
-          error = false;
-        }
-        break;
-
-      case MSG_STATE_F1:
-        if(inByte == 0xF1)
-        {
-          /*append in CRC*/
-          frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
 
           /*advance to next state*/
           frame->state = MSG_STATE_CMD;
@@ -258,7 +277,7 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
         break;
 
       case MSG_STATE_STOP:
-        if(inByte == 0x2E)
+        if(inByte == STOP_CHAR)
         {
           if(--(frame->stateRoundsLeft) == 0)
           {

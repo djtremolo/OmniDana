@@ -15,7 +15,7 @@ void fbTaskInitialize(OmniDanaContext_t *ctx)
 }
 
 
-void fbTask( void *pvParameters )
+void fbTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
 
