@@ -5,18 +5,27 @@
 #include "message_buffer.h"
 #include "ioInterface.h"
 
-/*MACROS*/
-#define REC_TO_COMM_BUFFER_SIZE   31    /*incoming messages*/
-#define COMM_TO_CTRL_BUFFER_SIZE  21    /*treatment requests*/
-#define COMM_TO_REC_BUFFER_SIZE   21    /*response messages*/
-#define FB_TO_CTRL_BUFFER_SIZE    21    /*feedback events*/
 
 /*TASK PRIORITIES*/
-#define UART_TASK_PRIORITY         7
-#define COMM_TASK_PRIORITY        8
-#define CTRL_TASK_PRIORITY        9
-#define FB_TASK_PRIORITY          10
+#define UART_TASK_PRIORITY            7
+#define COMM_TASK_PRIORITY            8
+#define CTRL_TASK_PRIORITY            9
+#define FB_TASK_PRIORITY              10
 
+/*DANARS MESSAGE SIZES*/
+#define DANA_MAX_PAYLOAD_LENGTH       16
+#define DANA_HEADER_LEN               5
+#define DANA_FOOTER_LEN               4
+#define DANA_HEADER_BYTES_AFTER_LEN   2
+#define DANA_MAX_BUF_LEN              (DANA_HEADER_LEN + DANA_MAX_PAYLOAD_LENGTH + DANA_FOOTER_LEN)
+#define DANA_MAX_LEN_FIELD            (DANA_HEADER_BYTES_AFTER_LEN + DANA_MAX_PAYLOAD_LENGTH)
+
+
+/*QUEUE LENGTHS - HOW MANY FULL MESSAGE FRAMES WILL FIT INTO MESSAGE QUEUE*/
+#define UART_TASK_QUEUE_LENGTH        2
+#define COMM_TASK_QUEUE_LENGTH        2
+#define CTRL_TASK_QUEUE_LENGTH        2
+#define FB_TASK_QUEUE_LENGTH          10
 
 typedef unsigned int size_t;
 typedef unsigned int uint16_t;
@@ -31,6 +40,42 @@ typedef struct
   boolean fbPdmIsBusy;
   buttonKey_t ctrlActiveButton;
 } OmniDanaContext_t;
+
+typedef struct
+{
+  uint16_t cmd;
+  uint8_t buf[DANA_MAX_PAYLOAD_LENGTH];
+  uint8_t length;
+} DanaMessage_t;
+
+typedef enum
+{
+  TREATMENT_BOLUS,
+  TREATMENT_EXTENDED_BOLUS,
+  TREATMENT_TEMPORARY_BASAL_RATE
+} TreatmentType_t;
+
+typedef struct
+{
+  TreatmentType_t treatment;
+  uint16_t param1;
+  uint16_t param2;  
+} TreatmentMessage_t;
+
+typedef enum
+{
+  FEEDBACK_OK,                    //double beeps
+  FEEDBACK_FAILURE,               //single beep
+  FEEDBACK_SCREAM_OF_DEATH,       //single continuous beep
+  FEEDBACK_USER_KEY_PRESS         //user pressed a button
+} FeedbackEvent_t;
+
+
+/*MESSAGE BUFFER SIZES*/
+#define REC_TO_COMM_BUFFER_SIZE       ((sizeof(DanaMessage_t) + sizeof(size_t)) * UART_TASK_QUEUE_LENGTH)         /*incoming messages*/
+#define COMM_TO_CTRL_BUFFER_SIZE      ((sizeof(TreatmentMessage_t) + sizeof(size_t)) * CTRL_TASK_QUEUE_LENGTH )   /*treatment requests*/
+#define COMM_TO_REC_BUFFER_SIZE       ((sizeof(DanaMessage_t) + sizeof(size_t)) * COMM_TASK_QUEUE_LENGTH)         /*response messages*/
+#define FB_TO_CTRL_BUFFER_SIZE        ((sizeof(FeedbackEvent_t) + sizeof(size_t)) * FB_TASK_QUEUE_LENGTH)         /*feedback events*/
 
 
 #endif//__OMNIDANACOMMON_H__

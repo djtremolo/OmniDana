@@ -2,24 +2,13 @@
 #include "uartTask.h"
 #include "util/crc16.h"
 
-#define START_CHAR          0xA5
-#define STOP_CHAR           0x5A
+#define START_CHAR                  0xA5
+#define STOP_CHAR                   0x5A
 
+#define DEBUG_PRINT                 false
+#define POLLING_TIME_MS             10
 
-
-
-#define DEBUG_PRINT             true
-#define POLLING_TIME_MS         10
-#define INCOMING_FRAME_MAX      20
-
-#define MAX_PAYLOAD_LENGTH      16
-#define HEADER_LEN              6
-#define FOOTER_LEN              4
-#define HEADER_BYTES_AFTER_LEN  3
-
-#define MAX_BUF_LEN             (HEADER_LEN+MAX_PAYLOAD_LENGTH+FOOTER_LEN)
-#define MAX_LEN_FIELD           (HEADER_BYTES_AFTER_LEN+MAX_PAYLOAD_LENGTH)
-
+#define IDLE_COUNTER_MAX            100
 
 typedef enum
 {
@@ -35,26 +24,27 @@ typedef enum
 
 typedef struct
 {
-  uint8_t buf[INCOMING_FRAME_MAX];
+  DanaMessage_t danaMsg; 
   uint8_t field_len; 
-  uint8_t currentPosition;
   danaFrameState_t state;
   uint8_t stateRoundsLeft;
   uint16_t crcCalculated;
   uint16_t crcReceived;
   bool isReady;
   bool isBusy;
+  uint16_t idleCounter;
 } danaFrame_t;
 
 
-void uartTask(void *pvParameters);
 void uartTaskInitialize(OmniDanaContext_t *ctx);
 
+static void uartTask(void *pvParameters);
 static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
 static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
 static void incomingFrameInitialize(danaFrame_t *frame);
 static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte);
+static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg);
 
 
 void uartTaskInitialize(OmniDanaContext_t *ctx)
@@ -68,21 +58,62 @@ void uartTaskInitialize(OmniDanaContext_t *ctx)
     ,  NULL );
 }
 
+static void uartTask(void *pvParameters)
+{
+  OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
+  danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
+  danaFrame_t *frame = &myDanaFrame;
+
+  /*start from scratch by resetting the incoming frame handler*/
+  incomingFrameInitialize(frame);
+
+  /*start receiving from uart.*/
+  while(1)
+  {
+    bool somethingHappened = false;
+
+    /*Phase 1: if receiver is not busy, send if commTask has something to send*/
+    somethingHappened |= sendToAAPS(ctx, frame);
+
+    /*Phase 2: receive if there's something to receive*/
+    somethingHappened |= receiveFromAAPS(ctx, frame);
+
+    /*If nothing happened, let's rest a bit.*/
+    if(!somethingHappened)
+    {
+      vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS );
+    }
+  }
+}
+
+
 
 static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
 {
   bool ret = false;
 
+  /*do not send while we are receiving. TODO: Check if this is really needed? BTLE should be full duplex?*/
   if(frame->isBusy == false)
   {
-    uint8_t txMsg[INCOMING_FRAME_MAX];
+    DanaMessage_t dMsg;
     
-    size_t txLen = xMessageBufferReceive(ctx->commToRecBuffer, (void*)txMsg, sizeof(txMsg), 0);
-    if(txLen > 0)
+    size_t len = xMessageBufferReceive(ctx->commToRecBuffer, (void*)&dMsg, sizeof(DanaMessage_t), 0);
+    if(len == sizeof(DanaMessage_t))
     {
-      size_t sentBytes;
-      sentBytes = Serial.write(txMsg, txLen);
-      ret = true;
+      uint8_t outMsg[DANA_MAX_BUF_LEN];
+      int outLen;
+
+      outLen = createOutMessage(outMsg, &dMsg);
+
+      if(outLen > 0)
+      {
+        size_t sentBytes = Serial.write(outMsg, outLen);
+
+        if(sentBytes == outLen)
+        {
+          ret = true;
+        }
+      }
     }
   }
 
@@ -120,46 +151,75 @@ static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
       break;
     }
   }
+
+  /*check if the message never finished... cancel after some rounds*/
+  if(frame->idleCounter++ >= IDLE_COUNTER_MAX)
+  {
+    incomingFrameInitialize(frame);
+    ret = true;
+  }
+
   return ret;
 }
 
-
-
-void uartTask(void *pvParameters)
+static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg)
 {
-  OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
-  danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
-  danaFrame_t *frame = &myDanaFrame;
+  int ret = -1;
 
-  /*start from scratch by resetting the incoming frame handler*/
-  incomingFrameInitialize(frame);
-
-  /*start receiving from uart.*/
-  while(1)
+  if(msg && msg->length <= DANA_MAX_PAYLOAD_LENGTH)
   {
-    bool somethingHappened = false;
+    uint16_t crc = 0;
+    int idx = 0;
+    uint8_t tmp;
 
-    /*Phase 1: if receiver is not busy, send if commTask has something to send*/
-    somethingHappened |= sendToAAPS(ctx, frame);
+    /*start*/
+    rawBuf[idx++] = START_CHAR;
+    rawBuf[idx++] = START_CHAR;
+    
+    /*len*/
+    rawBuf[idx++] = ((uint8_t)msg->length) + 2;
 
-    /*Phase 2: receive if there's something to receive*/
-    somethingHappened |= receiveFromAAPS(ctx, frame);
+    /*type*/
+    tmp = (uint8_t)((msg->cmd >> 8) & 0xFF);
+    rawBuf[idx++] = tmp;
+    crc = _crc16_update(crc, tmp);  
 
-    /*If nothing happened, let's rest a bit.*/
-    if(!somethingHappened)
+    /*code*/
+    tmp = (uint8_t)(msg->cmd & 0xFF);
+    rawBuf[idx++] = tmp;
+    crc = _crc16_update(crc, tmp);  
+
+    /*params*/
+    for(uint8_t i = 0; i < msg->length; i++)
     {
-      vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS );
+      tmp = msg->buf[i];
+      rawBuf[idx++] = tmp;
+      crc = _crc16_update(crc, tmp);  
     }
-  }
-}
 
+    /*crc1*/
+    rawBuf[idx++] = (uint8_t)((crc >> 8) & 0xFF);
+
+    /*crc2*/
+    rawBuf[idx++] = (uint8_t)(crc & 0xFF);
+
+    /*stop*/
+    rawBuf[idx++] = STOP_CHAR;
+    rawBuf[idx++] = STOP_CHAR;
+
+    ret = idx;
+  }
+
+  return ret;
+}
 
 
 
 static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame)
 {
   int ret = 0;
-  uint8_t bytesSent = xMessageBufferSend(msgBuf, (void*)frame->buf, frame->currentPosition, portMAX_DELAY);
+  DanaMessage_t *dMsg = &(frame->danaMsg);
+  uint8_t bytesSent = xMessageBufferSend(msgBuf, (void*)dMsg->buf, sizeof(DanaMessage_t), portMAX_DELAY);
 
 #if DEBUG_PRINT
   Serial.print("incomingFrameSendToCommTask: sent ");
@@ -167,7 +227,7 @@ static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t
   Serial.println(" bytes.");
 #endif
 
-  if(bytesSent != frame->currentPosition)
+  if(bytesSent != sizeof(DanaMessage_t))
   {
 #if DEBUG_PRINT
     Serial.println("uartTask: TX BUF FULL");
@@ -185,60 +245,69 @@ static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
 {
   bool error = true;
+  DanaMessage_t *dMsg;
 
-  if(frame->currentPosition < INCOMING_FRAME_MAX)
+  switch(frame->state)
   {
-    /*store byte*/
-    frame->buf[frame->currentPosition++] = inByte;
-
-    switch(frame->state)
-    {
-      case MSG_STATE_START:
-        if(inByte == START_CHAR)
-        {
-          /*receiving started - mark busy to disable sender*/
-          frame->isBusy = true;
-
-          if(--(frame->stateRoundsLeft) == 0)
-          {
-            /*last round -> advance to next state*/
-            frame->state = MSG_STATE_LEN;
-            /*no stateRoundsLeft needed for this state*/
-          }
-          error = false;
-        }
-        break;
-
-      case MSG_STATE_LEN:
-        if(inByte <= MAX_LEN_FIELD)
-        {
-          frame->field_len = inByte;
-
-          /*advance to next state*/
-          frame->state = MSG_STATE_CMD;
-          frame->stateRoundsLeft = 2;
-
-          /*ok!*/
-          error = false;
-        }
-        break;
-
-      case MSG_STATE_CMD:
-        /*append in CRC*/
-        frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
+    case MSG_STATE_START:
+      if(inByte == START_CHAR)
+      {
+        /*receiving started - mark busy to disable sender*/
+        frame->isBusy = true;
 
         if(--(frame->stateRoundsLeft) == 0)
         {
           /*last round -> advance to next state*/
-          frame->state = MSG_STATE_PAYLOAD;
-          frame->stateRoundsLeft = frame->field_len - HEADER_BYTES_AFTER_LEN;
+          frame->state = MSG_STATE_LEN;
+          /*no stateRoundsLeft needed for this state*/
         }
         error = false;
-        break;
+      }
+      break;
 
-      case MSG_STATE_PAYLOAD:
-        /*append in CRC*/
-        frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
+    case MSG_STATE_LEN:
+      if(inByte <= DANA_MAX_LEN_FIELD)
+      {
+        frame->field_len = inByte;
+
+        /*advance to next state*/
+        frame->state = MSG_STATE_CMD;
+        frame->stateRoundsLeft = 2;
+
+        /*ok!*/
+        error = false;
+      }
+      break;
+
+    case MSG_STATE_CMD:
+      /*append in CRC*/
+      frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
+
+      /*set command word*/
+      dMsg = &(frame->danaMsg);
+
+      dMsg->cmd <<= 8;
+      dMsg->cmd |= inByte;
+
+      if(--(frame->stateRoundsLeft) == 0)
+      {
+        /*last round -> advance to next state*/
+        frame->state = MSG_STATE_PAYLOAD;
+        frame->stateRoundsLeft = frame->field_len - DANA_HEADER_BYTES_AFTER_LEN;
+      }
+      error = false;
+      break;
+
+    case MSG_STATE_PAYLOAD:
+      /*append in CRC*/
+      frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
+
+      /*append to payload buffer*/
+      dMsg = &(frame->danaMsg);
+
+      if(dMsg->length < (DANA_MAX_PAYLOAD_LENGTH-1))
+      {
+        dMsg->buf[dMsg->length++] = inByte;
 
         if(--(frame->stateRoundsLeft) == 0)
         {
@@ -247,61 +316,61 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
           frame->stateRoundsLeft = 2;
         }
         error = false;
-        break;
+      }
+      break;
 
-      case MSG_STATE_CRC:
-        /*store the incoming CRC in two parts.
-        On first byte, the crcReceived==0, so shifting does not matter. We just or the low part.
-        On second byte, we shift left and OR with low part.*/
-        frame->crcReceived <<= 8;
-        frame->crcReceived |= inByte;
+    case MSG_STATE_CRC:
+      /*store the incoming CRC in two parts.
+      On first byte, the crcReceived==0, so shifting does not matter. We just or the low part.
+      On second byte, we shift left and OR with low part.*/
+      frame->crcReceived <<= 8;
+      frame->crcReceived |= inByte;
 
-        /*let's assume the receiving will be OK*/
-        error = false;
+      /*let's assume the receiving will be OK*/
+      error = false;
 
+      if(--(frame->stateRoundsLeft) == 0)
+      {
+        if(frame->crcReceived == frame->crcCalculated)
+        {
+          /*Checksum OK!*/
+          /*last round -> advance to next state*/
+          frame->state = MSG_STATE_STOP;
+          frame->stateRoundsLeft = 2;
+        }
+        else
+        {
+          /*CRC failed - drop frame*/
+          error = true;
+        }
+      }
+      break;
+
+    case MSG_STATE_STOP:
+      if(inByte == STOP_CHAR)
+      {
         if(--(frame->stateRoundsLeft) == 0)
         {
-          if(frame->crcReceived == frame->crcCalculated)
-          {
-            /*Checksum OK!*/
-            /*last round -> advance to next state*/
-            frame->state = MSG_STATE_STOP;
-            frame->stateRoundsLeft = 2;
-          }
-          else
-          {
-            /*CRC failed - drop frame*/
-            error = true;
-          }
+          /*last round -> advance to next state*/
+          frame->state = MSG_STATE_FINISHED;
+          /*no stateRoundsLeft needed for this state*/
+
+          /*mark frame ready to be sent to ControlTask*/
+          frame->isReady = true;
         }
-        break;
-
-      case MSG_STATE_STOP:
-        if(inByte == STOP_CHAR)
-        {
-          if(--(frame->stateRoundsLeft) == 0)
-          {
-            /*last round -> advance to next state*/
-            frame->state = MSG_STATE_FINISHED;
-            /*no stateRoundsLeft needed for this state*/
-
-            /*mark frame ready to be sent to ControlTask*/
-            frame->isReady = true;
-          }
-          error = false;
-        }
-        break;
-
-      case MSG_STATE_FINISHED:
-        /*idle... we shouldn't get here at anytime, but it wouldn't be an error.
-        We just drop all the bytes.*/
         error = false;
-        break;
+      }
+      break;
 
-      default:
-        /*out of sync*/
-        break;
-    }
+    case MSG_STATE_FINISHED:
+      /*idle... we shouldn't get here at anytime, but it wouldn't be an error.
+      We just drop all the bytes.*/
+      error = false;
+      break;
+
+    default:
+      /*out of sync*/
+      break;
   }
 
   if(error)
