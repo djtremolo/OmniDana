@@ -1,11 +1,13 @@
 #include "common.h"
 #include "uartTask.h"
-#include "util/crc16.h"
+//include "util/crc16.h"
+#include "Crc16.h"
+
 
 #define START_CHAR                  0xA5
 #define STOP_CHAR                   0x5A
 
-#define DEBUG_PRINT                 false
+#define DEBUG_PRINT                 true
 #define POLLING_TIME_MS             100
 
 #define IDLE_COUNTER_MAX            100
@@ -28,7 +30,6 @@ typedef struct
   uint8_t field_len; 
   danaFrameState_t state;
   uint8_t stateRoundsLeft;
-  uint16_t crcCalculated;
   uint16_t crcReceived;
   bool isReady;
   bool isBusy;
@@ -49,25 +50,33 @@ static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg);
 
 void uartTaskInitialize(OmniDanaContext_t *ctx)
 {
-  Serial.println("uartTask: starting");
+  Serial.println(F("uartTaskInitialize"));
 
   xTaskCreate(
     uartTask
     ,  (const portCHAR *)"uartTask"   // A name just for humans
-    ,  256  // Stack size
+    ,  240  // Stack size
     ,  (void*)ctx
     ,  UART_TASK_PRIORITY
     ,  NULL );
 }
 
-bool ledState = false;
-int cntr = 0;
+static danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
 
 static void uartTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
-  danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
   danaFrame_t *frame = &myDanaFrame;
+
+  #if DEBUG_PRINT
+  Serial.print(F("uartTask: starting with ctx = "));
+  Serial.print((uint16_t)ctx, HEX);
+  Serial.print(F(", ctx->recToCommBuffer = "));
+  Serial.print((uint16_t)(ctx->recToCommBuffer), HEX);
+  Serial.print(F(", ctx->commToRecBuffer = "));
+  Serial.print((uint16_t)(ctx->commToRecBuffer), HEX);
+  Serial.println();
+  #endif
 
   /*start from scratch by resetting the incoming frame handler*/
   incomingFrameInitialize(frame);
@@ -92,8 +101,6 @@ static void uartTask(void *pvParameters)
   }
 }
 
-
-
 static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
 {
   bool ret = false;
@@ -101,19 +108,17 @@ static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
   /*do not send while we are receiving. TODO: Check if this is really needed? BTLE should be full duplex?*/
   if(frame->isBusy == false)
   {
-    DanaMessage_t dMsg;
     
-    size_t len = xMessageBufferReceive(ctx->commToRecBuffer, (void*)&dMsg, sizeof(DanaMessage_t), 0);
+    size_t len = xMessageBufferReceive(ctx->commToRecBuffer, (void*)ctx->uartTaskMsg, sizeof(DanaMessage_t), 0);
     if(len == sizeof(DanaMessage_t))
     {
-      uint8_t outMsg[DANA_MAX_BUF_LEN];
       int outLen;
 
-      outLen = createOutMessage(outMsg, &dMsg);
+      outLen = createOutMessage(ctx->uartTaskRawMsg, ctx->uartTaskMsg);
 
       if(outLen > 0)
       {
-        size_t sentBytes = Serial.write(outMsg, outLen);
+        size_t sentBytes = Serial.write(ctx->uartTaskRawMsg, outLen);
 
         if(sentBytes == outLen)
         {
@@ -126,6 +131,8 @@ static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
   return ret;
 }
 
+
+
 static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
 {
   bool ret = false;
@@ -137,13 +144,12 @@ static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
   {
     uint8_t inByte = Serial.read();
 
-//    digitalWrite(LED_BUILTIN, ledState);
-//    ledState = !ledState;
-
-
-Serial.print(inByte, HEX);
-
-
+    #if DEBUG_PRINT
+    if(inByte<16)
+      Serial.print(F("0"));
+    Serial.print(inByte, HEX);
+    Serial.print(F(" "));
+    #endif
 
     /*follow frame structure*/
     incomingFrameFollow(frame, inByte);
@@ -152,6 +158,9 @@ Serial.print(inByte, HEX);
     commTask*/
     if(frame->isReady)
     {
+      #if DEBUG_PRINT
+      Serial.println(F("receiveFromAAPS: Incoming frame ready!"));
+      #endif
       /*send full frame (with header+payload+footer) to commTask*/
       incomingFrameSendToCommTask(ctx->recToCommBuffer, frame);
 
@@ -182,40 +191,33 @@ static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg)
 
   if(msg && msg->length <= DANA_MAX_PAYLOAD_LENGTH)
   {
-    uint16_t crc = 0;
+    Crc16 crc;
     int idx = 0;
     uint8_t tmp;
+    uint8_t payloadLen = ((uint8_t)msg->length) + 2;
 
     /*start*/
     rawBuf[idx++] = START_CHAR;
     rawBuf[idx++] = START_CHAR;
     
     /*len*/
-    rawBuf[idx++] = ((uint8_t)msg->length) + 2;
+    rawBuf[idx++] = payloadLen;
 
-    /*type*/
-    tmp = (uint8_t)((msg->cmd >> 8) & 0xFF);
-    rawBuf[idx++] = tmp;
-    crc = _crc16_update(crc, tmp);  
-
-    /*code*/
-    tmp = (uint8_t)(msg->cmd & 0xFF);
-    rawBuf[idx++] = tmp;
-    crc = _crc16_update(crc, tmp);  
-
-    /*params*/
+    /*type+code+params*/
     for(uint8_t i = 0; i < msg->length; i++)
     {
       tmp = msg->buf[i];
       rawBuf[idx++] = tmp;
-      crc = _crc16_update(crc, tmp);  
     }
 
+    crc.clearCrc();
+    uint16_t crcValue = crc.XModemCrc(rawBuf, 3, payloadLen);
+
     /*crc1*/
-    rawBuf[idx++] = (uint8_t)((crc >> 8) & 0xFF);
+    rawBuf[idx++] = (uint8_t)((crcValue >> 8) & 0xFF);
 
     /*crc2*/
-    rawBuf[idx++] = (uint8_t)(crc & 0xFF);
+    rawBuf[idx++] = (uint8_t)(crcValue & 0xFF);
 
     /*stop*/
     rawBuf[idx++] = STOP_CHAR;
@@ -236,15 +238,15 @@ static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t
   uint8_t bytesSent = xMessageBufferSend(msgBuf, (void*)dMsg->buf, sizeof(DanaMessage_t), portMAX_DELAY);
 
 #if DEBUG_PRINT
-  Serial.print("incomingFrameSendToCommTask: sent ");
+  Serial.print(F("incomingFrameSendToCommTask: sent "));
   Serial.print(bytesSent, DEC);
-  Serial.println(" bytes.");
+  Serial.println(F(" bytes."));
 #endif
 
   if(bytesSent != sizeof(DanaMessage_t))
   {
 #if DEBUG_PRINT
-    Serial.println("uartTask: TX BUF FULL");
+    Serial.println(F("uartTask: TX BUF FULL"));
 #endif
     ret = -1;
   }
@@ -294,14 +296,10 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
       break;
 
     case MSG_STATE_CMD:
-      /*append in CRC*/
-      frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
-
       /*set command word*/
       dMsg = &(frame->danaMsg);
 
-      dMsg->cmd <<= 8;
-      dMsg->cmd |= inByte;
+      dMsg->buf[dMsg->length++] = inByte;
 
       if(--(frame->stateRoundsLeft) == 0)
       {
@@ -313,9 +311,6 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
       break;
 
     case MSG_STATE_PAYLOAD:
-      /*append in CRC*/
-      frame->crcCalculated = _crc16_update(frame->crcCalculated, inByte);
-
       /*append to payload buffer*/
       dMsg = &(frame->danaMsg);
 
@@ -345,7 +340,16 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
 
       if(--(frame->stateRoundsLeft) == 0)
       {
-        if(frame->crcReceived == frame->crcCalculated)
+        Crc16 crc;
+
+        dMsg = &(frame->danaMsg);
+
+
+        /*calculate crc*/
+        crc.clearCrc();
+        uint16_t crcValue = crc.XModemCrc(dMsg->buf, 0, dMsg->length);
+
+        if(frame->crcReceived == crcValue)
         {
           /*Checksum OK!*/
           /*last round -> advance to next state*/
@@ -356,6 +360,11 @@ static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte)
         {
           /*CRC failed - drop frame*/
           error = true;
+
+          Serial.print(F("CRC FAIL: received: "));
+          Serial.print(frame->crcReceived, HEX);
+          Serial.print(F(", calculated: "));
+          Serial.println(crcValue, HEX);
         }
       }
       break;
@@ -401,5 +410,3 @@ static void incomingFrameInitialize(danaFrame_t *frame)
   frame->state = MSG_STATE_START;
   frame->stateRoundsLeft = 2;
 }
-
-

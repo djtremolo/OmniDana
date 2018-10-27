@@ -2,7 +2,7 @@
 #include "ctrlTask.h"
 #include "ioInterface.h"
 
-
+#define DEBUG_PRINT             true
 #define MAX_STEPS_IN_SEQUENCE   20
 
 
@@ -25,16 +25,21 @@ typedef struct
 sequenceStep_t keySequence[MAX_STEPS_IN_SEQUENCE];
 uint8_t keySequenceStepCount;
 
+static void handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr);
+static void ctrlTask(void *pvParameters);
+
 
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx);
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx)
 {
+  Serial.println(F("ctrlTaskInitialize"));
+
   xTaskCreate(
     ctrlTask
     ,  (const portCHAR *)"ctrlTask"   // A name just for humans
-    ,  128  // Stack size
+    ,  100  // Stack size
     ,  (void*)ctx
     ,  CTRL_TASK_PRIORITY  // priority
     ,  NULL );
@@ -42,39 +47,56 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
 
 
 
-void ctrlTask(void *pvParameters)
+static void ctrlTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
+
+  #if DEBUG_PRINT
+  Serial.print(F("ctrlTask: starting with ctx = "));
+  Serial.print((uint16_t)ctx, HEX);
+  Serial.print(F(", ctx->commToCtrlBuffer = "));
+  Serial.print((uint16_t)(ctx->commToCtrlBuffer), HEX);
+  Serial.println();
+  #endif
+
+/*
+while(1)
+{
+  vTaskDelay( 1000 / portTICK_PERIOD_MS );
+}
+*/
 
   IoInterfaceSetupPins();
 
   while(1)
   {
-    DanaMessage_t dMsg;
+    TreatmentMessage_t treatment;
 
-    int recBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void*)&dMsg, sizeof(DanaMessage_t), portMAX_DELAY);
+    #if DEBUG_PRINT
+    Serial.println(F("ctrlTask: listening for treatments."));
+    #endif
 
-    if(recBytes == sizeof(DanaMessage_t))
+    int recBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void*)&treatment, sizeof(TreatmentMessage_t), portMAX_DELAY);
+
+    if(recBytes == sizeof(TreatmentMessage_t))
     {
-      handleDanaCommand(ctx, &dMsg);
-
+      #if DEBUG_PRINT
+      Serial.flush();
+      Serial.println(F("ctrlTask: treatment received!"));
+      #endif
+      handleTreatment(ctx, &treatment);
     }
+
+BlinkLed(10);
 
     /*and continue waiting for next...*/
   }
 }
 
 
-static int handleDanaCommand(OmniDanaContext_t *ctx, DanaMessage_t *dMsg)
+static void handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr)
 {
-  int ret = -1;
-  switch(dMsg->cmd)
-  {
-    default:
-      //Serial.println("handleDanaCommand: unknown command");
-      break;
-  }
-  return ret;
+  #if DEBUG_PRINT
+  Serial.println(F("handleTreatment:"));
+  #endif
 }
-
-

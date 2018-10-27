@@ -5,10 +5,24 @@
 #include "fbTask.h"
 #include "commTask.h"
 
-
+void BlinkLed(int times)
+{
+  while(times--)
+  {
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay( 500 / portTICK_PERIOD_MS );
+    digitalWrite(LED_BUILTIN, LOW);
+    vTaskDelay( 500 / portTICK_PERIOD_MS );
+  }
+}
 
 /*INTERNAL DATA*/
-OmniDanaContext_t odContext;
+static DanaMessage_t commTaskMsg;
+static DanaMessage_t uartTaskMsg;
+static uint8_t uartTaskRawMsg[DANA_MAX_BUF_LEN];
+
+
+static OmniDanaContext_t odContext;
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -24,10 +38,15 @@ void setup() {
   odContext.commToCtrlBuffer = xMessageBufferCreate( COMM_TO_CTRL_BUFFER_SIZE );
   odContext.fbToCtrlBuffer = xMessageBufferCreate( FB_TO_CTRL_BUFFER_SIZE );
 
- // commTaskInitialize(&odContext);
- // ctrlTaskInitialize(&odContext);
- // fbTaskInitialize(&odContext);
+  odContext.commTaskMsg = &commTaskMsg;
+  odContext.uartTaskMsg = &uartTaskMsg;
+  odContext.uartTaskRawMsg = uartTaskRawMsg;
+
+  ctrlTaskInitialize(&odContext);
+  //fbTaskInitialize(&odContext);
   uartTaskInitialize(&odContext);
+  commTaskInitialize(&odContext);
+
 }
 
 void loop()
