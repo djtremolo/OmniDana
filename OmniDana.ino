@@ -3,7 +3,6 @@
 #include "uartTask.h"
 #include "ctrlTask.h"
 #include "fbTask.h"
-#include "commTask.h"
 
 void BlinkLed(int times)
 {
@@ -17,7 +16,7 @@ void BlinkLed(int times)
 }
 
 /*INTERNAL DATA*/
-static DanaMessage_t commTaskMsg;
+//static DanaMessage_t commTaskMsg;
 static DanaMessage_t uartTaskMsg;
 static uint8_t uartTaskRawMsg[DANA_MAX_BUF_LEN];
 
@@ -33,19 +32,12 @@ void setup() {
 
   memset(&odContext, 0, sizeof(OmniDanaContext_t));
 
-  odContext.commToRecBuffer = xMessageBufferCreate( COMM_TO_REC_BUFFER_SIZE );
-  odContext.recToCommBuffer = xMessageBufferCreate( REC_TO_COMM_BUFFER_SIZE );
   odContext.commToCtrlBuffer = xMessageBufferCreate( COMM_TO_CTRL_BUFFER_SIZE );
   odContext.fbToCtrlBuffer = xMessageBufferCreate( FB_TO_CTRL_BUFFER_SIZE );
 
-  odContext.commTaskMsg = &commTaskMsg;
-  odContext.uartTaskMsg = &uartTaskMsg;
-  odContext.uartTaskRawMsg = uartTaskRawMsg;
-
   ctrlTaskInitialize(&odContext);
-  //fbTaskInitialize(&odContext);
+  fbTaskInitialize(&odContext);
   uartTaskInitialize(&odContext);
-  commTaskInitialize(&odContext);
 
 }
 

@@ -1,6 +1,5 @@
 #include "common.h"
 #include "uartTask.h"
-//include "util/crc16.h"
 #include "Crc16.h"
 
 
@@ -24,6 +23,89 @@ typedef enum
 } danaFrameState_t;
 
 
+
+typedef enum
+{
+  /*first byte*/
+  TYPE_ENCRYPTION_REQUEST =                                0x01,
+  TYPE_ENCRYPTION_RESPONSE =                               0x02,
+  TYPE_COMMAND =                                           0xA1,
+  TYPE_RESPONSE =                                          0xB2,
+  TYPE_NOTIFY =                                            0xC3,
+  
+  /*second byte*/
+  OPCODE_ENCRYPTION__PUMP_CHECK =                          0x00,
+  OPCODE_ENCRYPTION__CHECK_PASSKEY =                       0xD0,
+  OPCODE_ENCRYPTION__PASSKEY_REQUEST =                     0xD1,
+  OPCODE_ENCRYPTION__PASSKEY_RETURN =                      0xD2,
+  OPCODE_ENCRYPTION__TIME_INFORMATION =                    0x01,
+  OPCODE_NOTIFY__DELIVERY_COMPLETE =                       0x01,
+  OPCODE_NOTIFY__DELIVERY_RATE_DISPLAY =                   0x02,
+  OPCODE_NOTIFY__ALARM =                                   0x03,
+  OPCODE_NOTIFY__MISSED_BOLUS_ALARM =                      0x04,
+  OPCODE_REVIEW__INITIAL_SCREEN_INFORMATION =              0x02,
+  OPCODE_REVIEW__DELIVERY_STATUS =                         0x03,
+  OPCODE_REVIEW__GET_PASSWORD =                            0x04,
+  OPCODE_REVIEW__BOLUS_AVG =                               0x10,
+  OPCODE_REVIEW__BOLUS =                                   0x11,
+  OPCODE_REVIEW__DAILY =                                   0x12,
+  OPCODE_REVIEW__PRIME =                                   0x13,
+  OPCODE_REVIEW__REFILL =                                  0x14,
+  OPCODE_REVIEW__BLOOD_GLUCOSE =                           0x15,
+  OPCODE_REVIEW__CARBOHYDRATE =                            0x16,
+  OPCODE_REVIEW__TEMPORARY =                               0x17,
+  OPCODE_REVIEW__SUSPEND =                                 0x18,
+  OPCODE_REVIEW__ALARM =                                   0x19,
+  OPCODE_REVIEW__BASAL =                                   0x1A,
+  OPCODE_REVIEW__ALL_HISTORY =                             0x1F,
+  OPCODE_REVIEW__GET_SHIPPING_INFORMATION =                0x20,
+  OPCODE_REVIEW__GET_PUMP_CHECK =                          0x21,
+  OPCODE_REVIEW__GET_USER_TIME_CHANGE_FLAG =               0x22,
+  OPCODE_REVIEW__SET_USER_TIME_CHANGE_FLAG_CLEAR =         0x23,
+  OPCODE_REVIEW__GET_MORE_INFORMATION =                    0x24,
+  OPCODE_REVIEW__SET_HISTORY_UPLOAD_MODE =                 0x25,
+  OPCODE_REVIEW__GET_TODAY_DELIVERY_TOTAL =                0x26,
+  OPCODE_BOLUS__GET_STEP_BOLUS_INFORMATION =               0x40,
+  OPCODE_BOLUS__GET_EXTENDED_BOLUS_STATE =                 0x41,
+  OPCODE_BOLUS__GET_EXTENDED_BOLUS =                       0x42,
+  OPCODE_BOLUS__GET_DUAL_BOLUS =                           0x43,
+  OPCODE_BOLUS__SET_STEP_BOLUS_STOP =                      0x44,
+  OPCODE_BOLUS__GET_CARBOHYDRATE_CALCULATION_INFORMATION = 0x45,
+  OPCODE_BOLUS__GET_EXTENDED_MENU_OPTION_STATE =           0x46,
+  OPCODE_BOLUS__SET_EXTENDED_BOLUS =                       0x47,
+  OPCODE_BOLUS__SET_DUAL_BOLUS =                           0x48,
+  OPCODE_BOLUS__SET_EXTENDED_BOLUS_CANCEL =                0x49,
+  OPCODE_BOLUS__SET_STEP_BOLUS_START =                     0x4A,
+  OPCODE_BOLUS__GET_CALCULATION_INFORMATION =              0x4B,
+  OPCODE_BOLUS__GET_BOLUS_RATE =                           0x4C,
+  OPCODE_BOLUS__SET_BOLUS_RATE =                           0x4D,
+  OPCODE_BOLUS__GET_CIR_CF_ARRAY =                         0x4E,
+  OPCODE_BOLUS__SET_CIR_CF_ARRAY =                         0x4F,
+  OPCODE_BOLUS__GET_BOLUS_OPTION =                         0x50,
+  OPCODE_BOLUS__SET_BOLUS_OPTION =                         0x51,
+  OPCODE_BASAL__SET_TEMPORARY_BASAL =                      0x60,
+  OPCODE_BASAL__TEMPORARY_BASAL_STATE =                    0x61,
+  OPCODE_BASAL__CANCEL_TEMPORARY_BASAL =                   0x62,
+  OPCODE_BASAL__GET_PROFILE_NUMBER =                       0x63,
+  OPCODE_BASAL__SET_PROFILE_NUMBER =                       0x64,
+  OPCODE_BASAL__GET_PROFILE_BASAL_RATE =                   0x65,
+  OPCODE_BASAL__SET_PROFILE_BASAL_RATE =                   0x66,
+  OPCODE_BASAL__GET_BASAL_RATE =                           0x67,
+  OPCODE_BASAL__SET_BASAL_RATE =                           0x68,
+  OPCODE_BASAL__SET_SUSPEND_ON =                           0x69,
+  OPCODE_BASAL__SET_SUSPEND_OFF =                          0x6A,
+  OPCODE_OPTION__GET_PUMP_TIME =                           0x70,
+  OPCODE_OPTION__SET_PUMP_TIME =                           0x71,
+  OPCODE_OPTION__GET_USER_OPTION =                         0x72,
+  OPCODE_OPTION__SET_USER_OPTION =                         0x73,
+  OPCODE_BASAL__APS_SET_TEMPORARY_BASAL =                  0xC1,
+  OPCODE__APS_HISTORY_EVENTS =                             0xC2,
+  OPCODE__APS_SET_EVENT_HISTORY =                          0xC3,
+  OPCODE_ETC__SET_HISTORY_SAVE =                           0xE0,
+  OPCODE_ETC__KEEP_CONNECTION =                            0xFF,
+} DanaRsCmd_t;
+
+
 typedef struct
 {
   DanaMessage_t danaMsg; 
@@ -40,12 +122,18 @@ typedef struct
 void uartTaskInitialize(OmniDanaContext_t *ctx);
 
 static void uartTask(void *pvParameters);
-static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
+static void sendToAAPS(OmniDanaContext_t *ctx, uint8_t *buf, int len);
 static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
 static void incomingFrameInitialize(danaFrame_t *frame);
 static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte);
-static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg);
+static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t *plBuf, uint8_t plLen);
+
+static int handlePayload(OmniDanaContext_t *ctx, DanaMessage_t *dMsg);
+
+static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len);
+static int handleTypeCommand(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len);
+static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len);
 
 
 void uartTaskInitialize(OmniDanaContext_t *ctx)
@@ -61,20 +149,15 @@ void uartTaskInitialize(OmniDanaContext_t *ctx)
     ,  NULL );
 }
 
-static danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
-
 static void uartTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
+  danaFrame_t myDanaFrame;  /*move this from stack to heap if this becomes too big.*/
   danaFrame_t *frame = &myDanaFrame;
 
   #if DEBUG_PRINT
   Serial.print(F("uartTask: starting with ctx = "));
   Serial.print((uint16_t)ctx, HEX);
-  Serial.print(F(", ctx->recToCommBuffer = "));
-  Serial.print((uint16_t)(ctx->recToCommBuffer), HEX);
-  Serial.print(F(", ctx->commToRecBuffer = "));
-  Serial.print((uint16_t)(ctx->commToRecBuffer), HEX);
   Serial.println();
   #endif
 
@@ -86,10 +169,7 @@ static void uartTask(void *pvParameters)
   {
     bool somethingHappened = false;
 
-    /*Phase 1: if receiver is not busy, send if commTask has something to send*/
-    somethingHappened |= sendToAAPS(ctx, frame);
-
-    /*Phase 2: receive if there's something to receive*/
+    /*receive if there's something to receive*/
     somethingHappened |= receiveFromAAPS(ctx, frame);
 
     /*If nothing happened, let's rest a bit.*/
@@ -100,12 +180,12 @@ static void uartTask(void *pvParameters)
 
   }
 }
-
+/*
 static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
 {
   bool ret = false;
 
-  /*do not send while we are receiving. TODO: Check if this is really needed? BTLE should be full duplex?*/
+  //do not send while we are receiving. TODO: Check if this is really needed? BTLE should be full duplex?
   if(frame->isBusy == false)
   {
     
@@ -130,7 +210,7 @@ static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
 
   return ret;
 }
-
+*/
 
 
 static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
@@ -161,8 +241,13 @@ static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
       #if DEBUG_PRINT
       Serial.println(F("receiveFromAAPS: Incoming frame ready!"));
       #endif
-      /*send full frame (with header+payload+footer) to commTask*/
-      incomingFrameSendToCommTask(ctx->recToCommBuffer, frame);
+
+      if(handlePayload(ctx, &(frame->danaMsg)) != 0)
+      {
+        #if DEBUG_PRINT
+        Serial.println(F("receiveFromAAPS: handlePayload failed"));
+        #endif
+      }
 
       /*after sending, let's restart receiving*/
       incomingFrameInitialize(frame);
@@ -185,33 +270,38 @@ static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
   return ret;
 }
 
-static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg)
+static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t *plBuf, uint8_t plLen)
 {
   int ret = -1;
 
-  if(msg && msg->length <= DANA_MAX_PAYLOAD_LENGTH)
+  if(plBuf && plLen <= DANA_MAX_PAYLOAD_LENGTH)
   {
     Crc16 crc;
     int idx = 0;
     uint8_t tmp;
-    uint8_t payloadLen = ((uint8_t)msg->length) + 2;
+    uint8_t lenField = plLen + 2;
 
     /*start*/
     rawBuf[idx++] = START_CHAR;
     rawBuf[idx++] = START_CHAR;
     
     /*len*/
-    rawBuf[idx++] = payloadLen;
+    rawBuf[idx++] = lenField;
 
-    /*type+code+params*/
-    for(uint8_t i = 0; i < msg->length; i++)
+    /*cmd1: type*/
+    rawBuf[idx++] = type;
+
+    /*cmd1: cmd*/
+    rawBuf[idx++] = code;
+
+    /*payload: params*/
+    for(uint8_t i = 0; i < plLen; i++)
     {
-      tmp = msg->buf[i];
-      rawBuf[idx++] = tmp;
+      rawBuf[idx++] = plBuf[i];
     }
 
     crc.clearCrc();
-    uint16_t crcValue = crc.XModemCrc(rawBuf, 3, payloadLen);
+    uint16_t crcValue = crc.XModemCrc(rawBuf, 3, lenField);
 
     /*crc1*/
     rawBuf[idx++] = (uint8_t)((crcValue >> 8) & 0xFF);
@@ -229,7 +319,7 @@ static int createOutMessage(uint8_t *rawBuf, DanaMessage_t *msg)
   return ret;
 }
 
-
+/*
 
 static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame)
 {
@@ -253,7 +343,7 @@ static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t
 
   return ret;
 }
-
+*/
 // A5 A5 LEN TYPE CODE PARAMS CHECKSUM1 CHECKSUM2 5A 5A
 //           ^---- LEN -----^
 // total packet length 2 + 1 + readBuffer[2] + 2 + 2
@@ -410,3 +500,629 @@ static void incomingFrameInitialize(danaFrame_t *frame)
   frame->state = MSG_STATE_START;
   frame->stateRoundsLeft = 2;
 }
+
+
+
+/*Incoming message handling*/
+
+static int handlePayload(OmniDanaContext_t *ctx, DanaMessage_t *dMsg)
+{
+  int ret = -1;
+  
+  if(dMsg && (dMsg->length >= 2))
+  {
+    uint8_t *buf = &(dMsg->buf[2]); 
+    uint8_t len = dMsg->length - 2;
+
+    switch(dMsg->buf[0])
+    {
+      case TYPE_ENCRYPTION_REQUEST:
+        ret = handleTypeEncryptionRequest(ctx, dMsg->buf[1], buf, len);
+        break;
+      case TYPE_COMMAND:
+        ret = handleTypeCommand(ctx, dMsg->buf[1], buf, len);
+        break;
+      case TYPE_NOTIFY:
+        ret = handleTypeEncryptionRequest(ctx, dMsg->buf[1], buf, len);
+        break;
+
+      default:
+  #if DEBUG_PRINT
+        Serial.print(F("commTask:handlePayload: Not implemented! type = "));
+        Serial.print(dMsg->buf[0], HEX);
+        Serial.print(F(", data=["));
+        for(uint8_t i=0; i<len; i++)
+        {
+          if(buf[i] < 16) Serial.print(F("0"));
+          Serial.print(buf[i], HEX);
+          if(i < len-1) Serial.print(F(" "));
+        }
+        Serial.println(F("]."));
+  #endif
+        break;
+    }
+  }
+  return ret;
+}
+
+
+
+
+static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
+{
+  int ret = -1;
+  uint8_t rawBuf[DANA_RAW_MSG_LEN(2)];  /*payload = 2bytes*/
+  int outLen;
+
+  switch(code)
+  {
+    case OPCODE_ENCRYPTION__PUMP_CHECK:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__PUMP_CHECK"));
+      #endif
+    
+      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__PUMP_CHECK, "OK", 2);
+  
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+      break;
+    case OPCODE_ENCRYPTION__CHECK_PASSKEY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__CHECK_PASSKEY"));
+      #endif
+          
+      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__CHECK_PASSKEY, "\0", 1);
+  
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+      break;
+    case OPCODE_ENCRYPTION__PASSKEY_REQUEST:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__PASSKEY_REQUEST"));
+      #endif
+
+    
+      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__PASSKEY_REQUEST, "\0", 1); /*0=OK, no need to request again*/
+  
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+      break;
+    case OPCODE_ENCRYPTION__PASSKEY_RETURN:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__PASSKEY_RETURN"));
+      #endif
+      break;
+    case OPCODE_ENCRYPTION__TIME_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__TIME_INFORMATION"));
+      #endif
+    
+      uint16_t pass = 7493;
+      pass ^= 3463;
+
+      uint8_t passBuf[2];
+      passBuf[0] = (pass & 0x00FF);
+      passBuf[1] = ((pass>>8) & 0x00FF);
+
+      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__TIME_INFORMATION, passBuf, 2); /*0=OK, no need to request again*/
+  
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+      break;
+
+    /*normal commands seem to come in as encryption messages*/
+    case OPCODE_REVIEW__INITIAL_SCREEN_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__INITIAL_SCREEN_INFORMATION"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__DELIVERY_STATUS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__DELIVERY_STATUS"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__GET_PASSWORD:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__GET_PASSWORD"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__BOLUS_AVG:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__BOLUS_AVG"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__BOLUS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__BOLUS"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__DAILY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__DAILY"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__PRIME:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__PRIME"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__REFILL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__REFILL"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__BLOOD_GLUCOSE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__BLOOD_GLUCOSE"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__CARBOHYDRATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__CARBOHYDRATE"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__TEMPORARY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__TEMPORARY"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__SUSPEND:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__SUSPEND"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__ALARM:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__ALARM"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__BASAL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__BASAL"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__ALL_HISTORY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__ALL_HISTORY"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__GET_SHIPPING_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__GET_SHIPPING_INFORMATION"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__GET_PUMP_CHECK:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__GET_PUMP_CHECK"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__GET_USER_TIME_CHANGE_FLAG:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__GET_USER_TIME_CHANGE_FLAG"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__SET_USER_TIME_CHANGE_FLAG_CLEAR:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__SET_USER_TIME_CHANGE_FLAG_CLEAR"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__GET_MORE_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__GET_MORE_INFORMATION"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__SET_HISTORY_UPLOAD_MODE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__SET_HISTORY_UPLOAD_MODE"));
+      #endif
+      break;
+
+    case OPCODE_REVIEW__GET_TODAY_DELIVERY_TOTAL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_REVIEW__GET_TODAY_DELIVERY_TOTAL"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_STEP_BOLUS_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_STEP_BOLUS_INFORMATION"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_EXTENDED_BOLUS_STATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_EXTENDED_BOLUS_STATE"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_EXTENDED_BOLUS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_EXTENDED_BOLUS"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_DUAL_BOLUS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_DUAL_BOLUS"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_STEP_BOLUS_STOP:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_STEP_BOLUS_STOP"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_CARBOHYDRATE_CALCULATION_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_CARBOHYDRATE_CALCULATION_INFORMATION"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_EXTENDED_MENU_OPTION_STATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_EXTENDED_MENU_OPTION_STATE"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_EXTENDED_BOLUS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_EXTENDED_BOLUS"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_DUAL_BOLUS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_DUAL_BOLUS"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_EXTENDED_BOLUS_CANCEL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_EXTENDED_BOLUS_CANCEL"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_STEP_BOLUS_START:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_STEP_BOLUS_START"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_CALCULATION_INFORMATION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_CALCULATION_INFORMATION"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_BOLUS_RATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_BOLUS_RATE"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_BOLUS_RATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_BOLUS_RATE"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_CIR_CF_ARRAY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_CIR_CF_ARRAY"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_CIR_CF_ARRAY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_CIR_CF_ARRAY"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__GET_BOLUS_OPTION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__GET_BOLUS_OPTION"));
+      #endif
+      break;
+
+    case OPCODE_BOLUS__SET_BOLUS_OPTION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BOLUS__SET_BOLUS_OPTION"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__SET_TEMPORARY_BASAL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__SET_TEMPORARY_BASAL"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__TEMPORARY_BASAL_STATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__TEMPORARY_BASAL_STATE"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__CANCEL_TEMPORARY_BASAL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__CANCEL_TEMPORARY_BASAL"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__GET_PROFILE_NUMBER:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__GET_PROFILE_NUMBER"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__SET_PROFILE_NUMBER:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__SET_PROFILE_NUMBER"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__GET_PROFILE_BASAL_RATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__GET_PROFILE_BASAL_RATE"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__SET_PROFILE_BASAL_RATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__SET_PROFILE_BASAL_RATE"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__GET_BASAL_RATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__GET_BASAL_RATE"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__SET_BASAL_RATE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__SET_BASAL_RATE"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__SET_SUSPEND_ON:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__SET_SUSPEND_ON"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__SET_SUSPEND_OFF:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__SET_SUSPEND_OFF"));
+      #endif
+      break;
+
+    case OPCODE_OPTION__GET_PUMP_TIME:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_OPTION__GET_PUMP_TIME"));
+      #endif
+      break;
+
+    case OPCODE_OPTION__SET_PUMP_TIME:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_OPTION__SET_PUMP_TIME"));
+      #endif
+      break;
+
+    case OPCODE_OPTION__GET_USER_OPTION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_OPTION__GET_USER_OPTION"));
+      #endif
+      break;
+
+    case OPCODE_OPTION__SET_USER_OPTION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_OPTION__SET_USER_OPTION"));
+      #endif
+      break;
+
+    case OPCODE_BASAL__APS_SET_TEMPORARY_BASAL:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_BASAL__APS_SET_TEMPORARY_BASAL"));
+      #endif
+      break;
+
+    case OPCODE__APS_HISTORY_EVENTS:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE__APS_HISTORY_EVENTS"));
+      #endif
+      break;
+
+    case OPCODE__APS_SET_EVENT_HISTORY:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE__APS_SET_EVENT_HISTORY"));
+      #endif
+      break;
+
+    case OPCODE_ETC__SET_HISTORY_SAVE:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ETC__SET_HISTORY_SAVE"));
+      #endif
+      break;
+
+    case OPCODE_ETC__KEEP_CONNECTION:
+      #if DEBUG_PRINT
+      Serial.println(F("handleTypeEncryptionRequest: OPCODE_ETC__KEEP_CONNECTION"));
+      #endif
+      break;
+
+
+
+
+
+
+
+
+
+    default:
+      #if DEBUG_PRINT
+      Serial.print(F("handleTypeEncryptionRequest: unimplemented code "));
+      Serial.print(code, HEX);
+      Serial.println(F("."));
+      #endif
+      break;
+  }
+
+  return ret;
+}
+
+static int handleTypeCommand(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
+{
+  int ret = -1;
+
+  switch(code)
+  {
+
+
+
+
+
+
+
+
+
+
+    default:
+      #if DEBUG_PRINT
+      Serial.print(F("handleTypeCommand: unimplemented code "));
+      Serial.print(code, HEX);
+      Serial.println(F("."));
+      #endif
+      break;
+  }
+
+  return ret;
+}
+
+
+static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
+{
+  int ret = -1;
+
+  #if DEBUG_PRINT
+  Serial.println(F("handleTypeEncryptionRequest"));
+  #endif
+
+  switch(code)
+  {
+    case OPCODE_NOTIFY__DELIVERY_COMPLETE:
+      #if DEBUG_PRINT
+      Serial.println(F("OPCODE_NOTIFY__DELIVERY_COMPLETE"));
+      #endif
+      break;
+
+    case OPCODE_NOTIFY__DELIVERY_RATE_DISPLAY:
+      #if DEBUG_PRINT
+      Serial.println(F("OPCODE_NOTIFY__DELIVERY_RATE_DISPLAY"));
+      #endif
+      break;
+
+    case OPCODE_NOTIFY__ALARM:
+      #if DEBUG_PRINT
+      Serial.println(F("OPCODE_NOTIFY__ALARM"));
+      #endif
+      break;
+
+    case OPCODE_NOTIFY__MISSED_BOLUS_ALARM:
+      #if DEBUG_PRINT
+      Serial.println(F("OPCODE_NOTIFY__MISSED_BOLUS_ALARM"));
+      #endif
+      break;
+
+    default:
+      #if DEBUG_PRINT
+      Serial.print(F("handleTypeNotify: unimplemented code "));
+      Serial.print(code, HEX);
+      Serial.println(F("."));
+      #endif
+      break;
+  }
+
+  return ret;
+}
+
+
+static void sendToAAPS(OmniDanaContext_t *ctx, uint8_t *buf, int len)
+{
+  (void)ctx;
+
+  if(buf && (len > 0))
+  {
+//    vTaskSuspendAll();
+    Serial.flush();
+    Serial.write(buf, (size_t)len);
+    Serial.flush();
+//    vTaskResumeAll();
+  }
+}
+
+#if 0
+
+static int danaMsgPumpCheck(OmniDanaContext_t *ctx, uint8_t *buf, uint8_t len)
+{
+  int ret = -1;
+  uint8_t rawBuf[DANA_RAW_MSG_LEN(2)];  /*payload = 2bytes*/
+
+  int outLen = createOutMessage(rawBuf, RSP_PUMP_CHECK, "OK", 2);
+  
+  /*send if a response was created*/
+  sendToAAPS(ctx, rawBuf, outLen);
+
+  return ret;
+}
+
+static int danaMsgPumpPasskeyRequest(OmniDanaContext_t *ctx, uint8_t *buf, uint8_t len)
+{
+  int ret = -1;
+  uint8_t rawBuf[DANA_RAW_MSG_LEN(2)];  /*payload = 2bytes*/
+
+  int outLen = createOutMessage(rawBuf, RSP_PUMP_PASSKEY_REQUEST, "11", 2);   /*just non zero is fine to ask for pairing request*/
+  sendToAAPS(ctx, rawBuf, outLen);
+
+  /*wait here?*/
+
+  outLen = createOutMessage(rawBuf, RSP_PUMP_CHECK_PASSKEY_RETURN, "ak", 2);
+  sendToAAPS(ctx, rawBuf, outLen);
+
+  return ret;
+}
+#endif

@@ -72,10 +72,6 @@ while(1)
   {
     TreatmentMessage_t treatment;
 
-    #if DEBUG_PRINT
-    Serial.println(F("ctrlTask: listening for treatments."));
-    #endif
-
     int recBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void*)&treatment, sizeof(TreatmentMessage_t), portMAX_DELAY);
 
     if(recBytes == sizeof(TreatmentMessage_t))

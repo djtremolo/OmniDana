@@ -8,7 +8,6 @@
 
 /*TASK PRIORITIES*/
 #define UART_TASK_PRIORITY            2
-#define COMM_TASK_PRIORITY            3
 #define CTRL_TASK_PRIORITY            4
 #define FB_TASK_PRIORITY              5
 
@@ -19,11 +18,10 @@
 #define DANA_HEADER_BYTES_AFTER_LEN   2
 #define DANA_MAX_BUF_LEN              (DANA_HEADER_LEN + DANA_MAX_PAYLOAD_LENGTH + DANA_FOOTER_LEN)
 #define DANA_MAX_LEN_FIELD            (DANA_HEADER_BYTES_AFTER_LEN + DANA_MAX_PAYLOAD_LENGTH)
+#define DANA_RAW_MSG_LEN(_plLen)      (DANA_HEADER_LEN + (_plLen) + DANA_FOOTER_LEN)
 
 
 /*QUEUE LENGTHS - HOW MANY FULL MESSAGE FRAMES WILL FIT INTO MESSAGE QUEUE*/
-#define UART_TASK_QUEUE_LENGTH        1
-#define COMM_TASK_QUEUE_LENGTH        1
 #define CTRL_TASK_QUEUE_LENGTH        4
 #define FB_TASK_QUEUE_LENGTH          10
 
@@ -63,25 +61,16 @@ typedef enum
 
 typedef struct
 {
-  MessageBufferHandle_t commToRecBuffer;
-  MessageBufferHandle_t recToCommBuffer;
   MessageBufferHandle_t commToCtrlBuffer;
   MessageBufferHandle_t fbToCtrlBuffer;
   boolean fbPdmIsBusy;
   buttonKey_t ctrlActiveButton;
-
-  /*statically reserved message containers*/
-  DanaMessage_t *commTaskMsg;
-  DanaMessage_t *uartTaskMsg;
-  uint8_t *uartTaskRawMsg;
 } OmniDanaContext_t;
 
 
 
 /*MESSAGE BUFFER SIZES*/
-#define REC_TO_COMM_BUFFER_SIZE       ((sizeof(DanaMessage_t) + sizeof(size_t)) * UART_TASK_QUEUE_LENGTH)         /*incoming messages*/
 #define COMM_TO_CTRL_BUFFER_SIZE      ((sizeof(TreatmentMessage_t) + sizeof(size_t)) * CTRL_TASK_QUEUE_LENGTH )   /*treatment requests*/
-#define COMM_TO_REC_BUFFER_SIZE       ((sizeof(DanaMessage_t) + sizeof(size_t)) * COMM_TASK_QUEUE_LENGTH)         /*response messages*/
 #define FB_TO_CTRL_BUFFER_SIZE        ((sizeof(FeedbackEvent_t) + sizeof(size_t)) * FB_TASK_QUEUE_LENGTH)         /*feedback events*/
 
 
