@@ -57,6 +57,34 @@ typedef enum
   FEEDBACK_USER_KEY_PRESS         //user pressed a button
 } FeedbackEvent_t;
 
+typedef struct
+{
+  uint8_t error;
+  uint8_t status;
+/*
+        pump.pumpSuspended = (status & 0x01) == 0x01;
+        pump.isTempBasalInProgress = (status & 0x10) == 0x10;
+        pump.isExtendedInProgress = (status & 0x04) == 0x04;
+        pump.isDualBolusInProgress = (status & 0x08) == 0x08;
+*/
+
+
+
+
+  boolean isExtendedInProgress;
+  uint16_t extendedBolusMinutes;
+  float extendedBolusAbsoluteRate;
+  uint16_t extendedBolusSoFarInMinutes;
+  float extendedBolusDeliveredSoFar;
+
+  float dailyTotalUnits;
+  float maxDailyTotalUnits;
+  float reservoirRemainingUnits;
+  float currentBasal;
+  uint8_t tempBasalPercent;
+  uint8_t batteryRemaining;
+  float iob;
+} DanaRSPump_t;
 
 
 typedef struct
@@ -65,6 +93,8 @@ typedef struct
   MessageBufferHandle_t fbToCtrlBuffer;
   boolean fbPdmIsBusy;
   buttonKey_t ctrlActiveButton;
+
+  DanaRSPump_t pump;
 } OmniDanaContext_t;
 
 
