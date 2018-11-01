@@ -1,6 +1,8 @@
 #include "common.h"
 #include "uartTask.h"
 #include "Crc16.h"
+#include "msgBuf.h"
+
 
 
 #define START_CHAR                  0xA5
@@ -138,7 +140,7 @@ void uartTaskInitialize(OmniDanaContext_t *ctx)
   xTaskCreate(
     uartTask
     ,  (const portCHAR *)"uartTask"   // A name just for humans
-    ,  240  // Stack size
+    ,  300  // Stack size
     ,  (void*)ctx
     ,  UART_TASK_PRIORITY
     ,  NULL );
@@ -153,7 +155,7 @@ static void uartTask(void *pvParameters)
   #if DEBUG_PRINT
   Serial.print(F("uartTask: starting with ctx = "));
   Serial.print((uint16_t)ctx, HEX);
-  Serial.println("SKLDJF");
+  Serial.println(".");
   #endif
 
   /*start from scratch by resetting the incoming frame handler*/
@@ -592,8 +594,19 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
       #if DEBUG_PRINT
       Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__CHECK_PASSKEY"));
       #endif
-          
-      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__CHECK_PASSKEY, "\0", 1);
+
+      (void)msgGetU8(&buf);   /*consume, length not needed yet*/
+
+ctx->pump.pass = 7493;
+
+      tempBuf[0] = 1; /*failure by default*/
+      if(msgGetU16(&buf) == ((ctx->pump.pass) ^ 3463))
+      {
+        tempBuf[0] = 0; /*OK*/        
+      }
+
+
+      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__CHECK_PASSKEY, tempBuf, 1);
   
       /*send if a response was created*/
       sendToAAPS(ctx, rawBuf, outLen);
@@ -607,12 +620,32 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
       Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__PASSKEY_REQUEST"));
       #endif
 
-    
-      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__PASSKEY_REQUEST, "\0", 1); /*0=OK, no need to request again*/
-  
+      uint8_t *pairingKey = tempBuf;
+
+      if(!ctx->pump.pairingRequested)
+      {
+        msgPutU16(&pairingKey, (ctx->pump.pass) ^ 3463);
+
+        /*TODO: should send pairing key*/
+
+        outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__PASSKEY_RETURN, tempBuf, msgLen(tempBuf, pairingKey)); /*0 = ok, continue*/
+        ctx->pump.pairingRequested = true;    
+      }
+      else
+      {
+
+ctx->pump.pass = 7493;
+
+        msgPutU16(&pairingKey, (ctx->pump.pass)^3463);
+
+        outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__TIME_INFORMATION, tempBuf, msgLen(tempBuf, pairingKey)); 
+      }
+
       /*send if a response was created*/
       sendToAAPS(ctx, rawBuf, outLen);
-      
+
+
+
       /*mark ok*/
       ret = 0;
 
@@ -622,13 +655,14 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
       Serial.println(F("handleTypeEncryptionRequest: OPCODE_ENCRYPTION__TIME_INFORMATION"));
       #endif
     
-      uint16_t pass = 7493;
-      pass ^= 3463;
+      uint8_t *b = tempBuf;
 
-      tempBuf[0] = (pass & 0x00FF);
-      tempBuf[1] = ((pass>>8) & 0x00FF);
+ctx->pump.pass = 7493;
 
-      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__TIME_INFORMATION, tempBuf, 2); /*0=OK, no need to request again*/
+
+      msgPutU16(&b, (ctx->pump.pass)^3463);
+
+      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OPCODE_ENCRYPTION__TIME_INFORMATION, tempBuf, msgLen(tempBuf, b)); /*0=OK, no need to request again*/
   
       /*send if a response was created*/
       sendToAAPS(ctx, rawBuf, outLen);
@@ -716,107 +750,9 @@ static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, 
 
 
 
-static uint8_t msgLen(uint8_t *start, uint8_t *currentPosition)
-{
-  size_t a = (size_t)start;
-  size_t b = (size_t)currentPosition;
-
-  uint8_t len = (a < b) ? (uint8_t)(b - a) : 0; 
-  return (uint8_t)(b - a);
-}
-
-static void msgPutU16(uint8_t **buf, uint16_t val)
-{
-  if(buf && *buf)
-  {
-    uint8_t *b = *buf;
-
-    *(b++) = (val & 0xFF);
-    *(b++) = ((val >> 8) & 0xFF);
-
-    *buf = b;
-  }
-}
-
-static void msgPutU8(uint8_t **buf, uint8_t val)
-{
-  if(buf && *buf)
-  {
-    uint8_t *b = *buf;
-
-    *(b++) = (val & 0xFF);
-
-    *buf = b;
-  }
-}
-
-static void msgPutU32(uint8_t **buf, uint32_t val)
-{
-  if(buf && *buf)
-  {
-    uint8_t *b = *buf;
-
-    *(b++) = (val & 0xFF);
-    *(b++) = ((val >> 8) & 0xFF);
-    *(b++) = ((val >> 16) & 0xFF);
-    *(b++) = ((val >> 24) & 0xFF);
-
-    *buf = b;
-  }
-}
-
-static uint16_t msgGetU16(uint8_t **buf)
-{
-  uint16_t ret = 0;
-  if(buf && *buf)
-  {
-    uint8_t *b = *buf;
-
-    ret |= *(b++);
-    ret |= (*(b++)) << 8;
-
-    *buf = b;
-  }
-  return ret;
-}
-
-static uint8_t msgGetU8(uint8_t **buf)
-{
-  uint8_t ret = 0;
-  if(buf && *buf)
-  {
-    uint8_t *b = *buf;
-
-    ret |= *(b++);
-
-    *buf = b;
-  }
-  return ret;
-}
-
-static uint32_t msgGetU32(uint8_t **buf)
-{
-  uint32_t ret = 0;
-  if(buf && *buf)
-  {
-    uint8_t *b = *buf;
-
-    ret |= *(b++);
-    ret |= (*(b++)) << 8;
-    ret |= (*(b++)) << 16;
-    ret |= (*(b++)) << 24;
-
-    *buf = b;
-  }
-  return ret;
-}
 
 
-
-
-
-
-#define RESP_MAX_PAYLOAD_ALLOCATION    20
+#define RESP_MAX_PAYLOAD_ALLOCATION    32
 
 static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
 {
@@ -824,6 +760,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
   uint8_t rawBuf[DANA_RAW_MSG_LEN(RESP_MAX_PAYLOAD_ALLOCATION)];
   uint8_t tempBuf[RESP_MAX_PAYLOAD_ALLOCATION];
   uint8_t *msgPtr = tempBuf;
+  uint8_t *rPtr = &(buf[2]);
   int outLen;
 
   switch(code)
@@ -836,11 +773,13 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
       #endif
       msgPutU8(&msgPtr, ctx->pump.status);
 
-ctx->pump.dailyTotalUnits = 25.67;
+ctx->pump.dailyTotalUnits = 26.67;
+ctx->pump.maxDailyTotalUnits = 90.67;
+
 ctx->pump.currentBasal = 1.5;
 ctx->pump.iob = 2.3;
 ctx->pump.batteryRemaining = 89;
-ctx->pump.reservoirRemainingUnits = 66.7;
+ctx->pump.reservoirRemainingUnits = 70.7;
 
 
       msgPutU16(&msgPtr, (uint16_t)(ctx->pump.dailyTotalUnits * 100.0));
@@ -949,18 +888,68 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_REVIEW__ALL_HISTORY"));
       #endif
       break;
-
+#endif
     case OPCODE_REVIEW__GET_SHIPPING_INFORMATION:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_REVIEW__GET_SHIPPING_INFORMATION"));
       #endif
-      break;
 
+      
+
+      for(int i=0; i<10; i++)
+      {
+        uint8_t s[] = "1234567890";
+        ctx->pump.serialNumber[i] = s[i];
+        msgPutU8(&msgPtr, ctx->pump.serialNumber[i]);
+      }
+
+      for(int i=0; i<3; i++)
+      {
+        uint8_t s[] = {2018-1900, 11-1, 1 };
+        ctx->pump.shippingDate[i] = s[i];
+        msgPutU8(&msgPtr, ctx->pump.shippingDate[i]);
+      }
+      for(int i=0; i<3; i++)
+      {
+        uint8_t s[] = "FIN";
+        ctx->pump.shippingCountry[i] = s[i];
+        msgPutU8(&msgPtr, ctx->pump.shippingCountry[i]);
+      }
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_REVIEW__GET_SHIPPING_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+
+      break;
     case OPCODE_REVIEW__GET_PUMP_CHECK:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_REVIEW__GET_PUMP_CHECK"));
       #endif
+
+      ctx->pump.model = 1;
+      ctx->pump.protocol = 2;
+      ctx->pump.productCode = 3;
+
+      msgPutU8(&msgPtr, ctx->pump.model);
+      msgPutU8(&msgPtr, ctx->pump.protocol);
+      msgPutU8(&msgPtr, ctx->pump.productCode);
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_REVIEW__GET_PUMP_CHECK, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
       break;
+
+#if 0
 
     case OPCODE_REVIEW__GET_USER_TIME_CHANGE_FLAG:
       #if DEBUG_PRINT
@@ -991,13 +980,45 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_REVIEW__GET_TODAY_DELIVERY_TOTAL"));
       #endif
       break;
+#endif
 
     case OPCODE_BOLUS__GET_STEP_BOLUS_INFORMATION:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__GET_STEP_BOLUS_INFORMATION"));
       #endif
+
+
+ctx->pump.bolusType = 0;
+ctx->pump.initialBolusAmount = 4.0;
+ctx->pump.lastBolusTimeHour = 18;
+ctx->pump.lastBolusTimeMinute = 47;
+ctx->pump.lastBolusAmount = 5.0;
+ctx->pump.maxBolus = 24;
+ctx->pump.bolusStep = 0.10;
+
+
+      msgPutU8(&msgPtr, ctx->pump.error);
+
+      msgPutU8(&msgPtr, ctx->pump.bolusType);
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.initialBolusAmount * 100.0));
+      msgPutU8(&msgPtr, ctx->pump.lastBolusTimeHour);
+      msgPutU8(&msgPtr, ctx->pump.lastBolusTimeMinute);
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.lastBolusAmount * 100.0));
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.maxBolus * 100.0));
+      msgPutU8(&msgPtr, (uint8_t)(ctx->pump.bolusStep * 100.0));
+
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BOLUS__GET_STEP_BOLUS_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+
+
       break;
-#endif
 
 
     case OPCODE_BOLUS__GET_EXTENDED_BOLUS_STATE:
@@ -1078,13 +1099,40 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__SET_STEP_BOLUS_START"));
       #endif
       break;
-
+#endif
     case OPCODE_BOLUS__GET_CALCULATION_INFORMATION:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__GET_CALCULATION_INFORMATION"));
       #endif
-      break;
 
+
+
+ctx->pump.currentTarget = 5;
+ctx->pump.currentCIR = 20;
+ctx->pump.currentCF = 6;
+ctx->pump.iob = 4.5;
+ctx->pump.units = UNITS_MMOL;
+
+
+      msgPutU8(&msgPtr, ctx->pump.error);
+      msgPutU16(&msgPtr, 0);    //currentBG
+      msgPutU16(&msgPtr, 0);    //carbohydrate
+      msgPutU16(&msgPtr, ctx->pump.currentTarget);
+      msgPutU16(&msgPtr, ctx->pump.currentCIR);
+      msgPutU16(&msgPtr, ctx->pump.currentCF);
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.iob * 100.0));
+      msgPutU8(&msgPtr, ctx->pump.units);
+
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BOLUS__GET_CALCULATION_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+      break;
+#if 0
     case OPCODE_BOLUS__GET_BOLUS_RATE:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__GET_BOLUS_RATE"));
@@ -1096,25 +1144,95 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__SET_BOLUS_RATE"));
       #endif
       break;
-
+#endif
     case OPCODE_BOLUS__GET_CIR_CF_ARRAY:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__GET_CIR_CF_ARRAY"));
       #endif
-      break;
+     
 
+
+ctx->pump.language = 0;
+ctx->pump.units = UNITS_MMOL;
+ctx->pump.morningCIR = 20;
+ctx->pump.afternoonCIR = 21;
+ctx->pump.eveningCIR = 22;
+ctx->pump.nightCIR = 23;
+ctx->pump.morningCF = 6;
+ctx->pump.afternoonCF = 7;
+ctx->pump.eveningCF = 6;
+ctx->pump.nightCF = 5;
+
+
+
+
+      msgPutU8(&msgPtr, ctx->pump.language);
+      msgPutU8(&msgPtr, ctx->pump.units);
+
+      msgPutU16(&msgPtr, ctx->pump.morningCIR);
+      msgPutU16(&msgPtr, ctx->pump.afternoonCIR);
+      msgPutU16(&msgPtr, 0);
+      msgPutU16(&msgPtr, ctx->pump.eveningCIR);
+      msgPutU16(&msgPtr, 0);
+      msgPutU16(&msgPtr, ctx->pump.nightCIR);
+
+
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.morningCF * 100.0));
+      msgPutU16(&msgPtr, 0);
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.afternoonCF * 100.0));
+      msgPutU16(&msgPtr, 0);
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.eveningCF * 100.0));
+      msgPutU16(&msgPtr, 0);
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.nightCF * 100.0));
+
+
+
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BOLUS__GET_CIR_CF_ARRAY, tempBuf, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+      break;
+#if 0
     case OPCODE_BOLUS__SET_CIR_CF_ARRAY:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__SET_CIR_CF_ARRAY"));
       #endif
       break;
-
+#endif
     case OPCODE_BOLUS__GET_BOLUS_OPTION:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__GET_BOLUS_OPTION"));
       #endif
-      break;
 
+  ctx->pump.isExtendedBolusEnabled = 1;
+  ctx->pump.bolusCalculationOption = 0;
+  ctx->pump.missedBolusConfig = 0;
+
+      msgPutU8(&msgPtr, ctx->pump.isExtendedBolusEnabled);
+      msgPutU8(&msgPtr, ctx->pump.bolusCalculationOption);
+      msgPutU8(&msgPtr, ctx->pump.missedBolusConfig);
+
+      for(int i=0; i<16; i++)
+        msgPutU8(&msgPtr, 0);
+
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BOLUS__GET_BOLUS_OPTION, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+
+
+      break;
+#if 0
     case OPCODE_BOLUS__SET_BOLUS_OPTION:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BOLUS__SET_BOLUS_OPTION"));
@@ -1126,25 +1244,55 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__SET_TEMPORARY_BASAL"));
       #endif
       break;
-
+#endif
     case OPCODE_BASAL__TEMPORARY_BASAL_STATE:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__TEMPORARY_BASAL_STATE"));
       #endif
-      break;
 
+      msgPutU8(&msgPtr, ctx->pump.error);
+
+      msgPutU8(&msgPtr, ctx->pump.isTempBasalInProgress);
+      msgPutU8(&msgPtr, ctx->pump.tempBasalPercent);
+      msgPutU8(&msgPtr, ctx->pump.tempBasalDurationHour);   /*TODO: 150==15min, 160==30min, otherwise hour*3600*/
+      msgPutU16(&msgPtr, ctx->pump.tempBasalRunningMin);
+
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BASAL__TEMPORARY_BASAL_STATE, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+      break;
+#if 0 
     case OPCODE_BASAL__CANCEL_TEMPORARY_BASAL:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__CANCEL_TEMPORARY_BASAL"));
       #endif
       break;
-
+#endif
     case OPCODE_BASAL__GET_PROFILE_NUMBER:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__GET_PROFILE_NUMBER"));
       #endif
+
+ctx->pump.activeProfile = 2;
+
+      msgPutU8(&msgPtr, ctx->pump.activeProfile);
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BASAL__GET_PROFILE_NUMBER, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
       break;
 
+#if 0
     case OPCODE_BASAL__SET_PROFILE_NUMBER:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__SET_PROFILE_NUMBER"));
@@ -1162,13 +1310,36 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__SET_PROFILE_BASAL_RATE"));
       #endif
       break;
-
+#endif
     case OPCODE_BASAL__GET_BASAL_RATE:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__GET_BASAL_RATE"));
       #endif
-      break;
 
+
+ctx->pump.maxBasal = 4.0;
+ctx->pump.basalStep = 0.1;  /*float as u8*/
+
+
+      msgPutU16(&msgPtr, (uint16_t)(ctx->pump.maxBasal * 100.0));
+      msgPutU8(&msgPtr, (uint8_t)(ctx->pump.basalStep * 100.0));
+
+      for(int i=0; i<24; i++)
+      {
+        msgPutU16(&msgPtr, 0);  /*pump profile basals - not supported, so send zero*/
+      }
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_BASAL__GET_BASAL_RATE, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
+
+
+      break;
+#if 0
     case OPCODE_BASAL__SET_BASAL_RATE:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__SET_BASAL_RATE"));
@@ -1186,19 +1357,58 @@ ctx->pump.reservoirRemainingUnits = 66.7;
       Serial.println(F("handleTypeResponse: OPCODE_BASAL__SET_SUSPEND_OFF"));
       #endif
       break;
-
+#endif
     case OPCODE_OPTION__GET_PUMP_TIME:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_OPTION__GET_PUMP_TIME"));
       #endif
+     
+      time_t t = now(); // store the current time in time variable t
+      msgPutU8(&msgPtr, (uint8_t)(year(t)-2000));
+      msgPutU8(&msgPtr, (uint8_t)month(t));
+      msgPutU8(&msgPtr, (uint8_t)day(t));
+      msgPutU8(&msgPtr, (uint8_t)hour(t));
+      msgPutU8(&msgPtr, (uint8_t)minute(t));
+      msgPutU8(&msgPtr, (uint8_t)second(t));
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_OPTION__GET_PUMP_TIME, tempBuf, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
       break;
 
     case OPCODE_OPTION__SET_PUMP_TIME:
       #if DEBUG_PRINT
-      Serial.println(F("handleTypeResponse: OPCODE_OPTION__SET_PUMP_TIME"));
+      Serial.println("handleTypeResponse: OPCODE_OPTION__SET_PUMP_TIME");   /*F removed!*/
       #endif
+
+      if(msgGetU8(&rPtr) == 6)
+      {
+        uint16_t year = msgGetU8(&rPtr) + 2000;
+        uint8_t month = msgGetU8(&rPtr);
+        uint8_t day = msgGetU8(&rPtr);
+        uint8_t hour = msgGetU8(&rPtr);
+        uint8_t minute = msgGetU8(&rPtr);
+        uint8_t second = msgGetU8(&rPtr);
+
+        setTime(hour, minute, second, day, month, year);
+      }
+
+      msgPutU8(&msgPtr, 0); /*time set ok*/
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OPCODE_OPTION__SET_PUMP_TIME, tempBuf, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+      
+      /*mark ok*/
+      ret = 0;
       break;
 
+#if 0
     case OPCODE_OPTION__GET_USER_OPTION:
       #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OPCODE_OPTION__GET_USER_OPTION"));

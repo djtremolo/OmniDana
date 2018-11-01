@@ -4,6 +4,7 @@
 #include <Arduino_FreeRTOS.h>
 #include "message_buffer.h"
 #include "ioInterface.h"
+#include <Time.h>
 
 
 /*TASK PRIORITIES*/
@@ -24,6 +25,9 @@
 /*QUEUE LENGTHS - HOW MANY FULL MESSAGE FRAMES WILL FIT INTO MESSAGE QUEUE*/
 #define CTRL_TASK_QUEUE_LENGTH        4
 #define FB_TASK_QUEUE_LENGTH          10
+
+#define UNITS_MMOL                    1
+
 
 typedef unsigned int size_t;
 typedef unsigned int uint16_t;
@@ -59,6 +63,9 @@ typedef enum
 
 typedef struct
 {
+  boolean pairingRequested;
+
+  uint16_t pass;
   uint8_t error;
   uint8_t status;
 /*
@@ -81,10 +88,62 @@ typedef struct
   float maxDailyTotalUnits;
   float reservoirRemainingUnits;
   float currentBasal;
-  uint8_t tempBasalPercent;
   uint8_t batteryRemaining;
   float iob;
+
+  uint8_t bolusType;
+  float initialBolusAmount;
+  uint8_t lastBolusTimeHour;
+  uint8_t lastBolusTimeMinute;
+  float lastBolusAmount;
+  float maxBolus;
+  float bolusStep;
+
+  uint8_t isTempBasalInProgress;
+  uint8_t tempBasalPercent;
+  uint8_t tempBasalDurationHour;    /*150==15min, 160==30min, otherwise hour*3600*/
+  uint16_t tempBasalRunningMin;
+
+  uint8_t serialNumber[10];
+  uint8_t shippingDate[3];    /* byte0=year minus 1900, byte1=month between 0-11, byte2= day of the month between 1-31.*/
+  uint8_t shippingCountry[3];
+
+  uint8_t model;
+  uint8_t protocol;
+  uint8_t productCode;
+
+  uint8_t activeProfile;
+
+
+  uint8_t isExtendedBolusEnabled;
+  uint8_t bolusCalculationOption;
+  uint8_t missedBolusConfig;
+
+  float maxBasal;
+  float basalStep;  /*float as u8*/
+
+  uint16_t currentTarget;
+  uint16_t currentCIR;
+  uint16_t currentCF;
+  uint8_t units;
+
+  uint8_t language;
+
+  uint16_t morningCIR;
+  uint16_t afternoonCIR;
+  uint16_t eveningCIR;
+  uint16_t nightCIR;
+
+  float morningCF;
+  float afternoonCF;
+  float eveningCF;
+  float nightCF;
+
+
+
 } DanaRSPump_t;
+
+
 
 
 typedef struct
@@ -97,6 +156,7 @@ typedef struct
   DanaRSPump_t pump;
 } OmniDanaContext_t;
 
+extern time_t mySoftRTC;
 
 
 /*MESSAGE BUFFER SIZES*/
@@ -106,5 +166,7 @@ typedef struct
 
 
 void BlinkLed(int times);
+void clockUpdate();
+
 
 #endif//__OMNIDANACOMMON_H__

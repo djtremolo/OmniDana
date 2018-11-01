@@ -33,6 +33,8 @@ void fbTask(void *pvParameters)
   {
     //Serial.println(F("fbTask"));
 
+    //clockUpdate();  /*do this somewhere*/
+
     vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS ); // wait for one second
   }
 }

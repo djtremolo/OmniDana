@@ -28,6 +28,8 @@ void setup() {
 
   Serial.begin(115200);
 
+  setTime(0,40,33,1,11,2018);
+
   pinMode(LED_BUILTIN, OUTPUT);
 
   memset(&odContext, 0, sizeof(OmniDanaContext_t));
