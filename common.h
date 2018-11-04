@@ -13,7 +13,7 @@
 #define FB_TASK_PRIORITY              5
 
 /*DANARS MESSAGE SIZES*/
-#define DANA_MAX_PAYLOAD_LENGTH       20
+#define DANA_MAX_PAYLOAD_LENGTH       60
 #define DANA_HEADER_LEN               5
 #define DANA_FOOTER_LEN               4
 #define DANA_HEADER_BYTES_AFTER_LEN   2
@@ -121,6 +121,8 @@ typedef struct
 
   float maxBasal;
   float basalStep;  /*float as u8*/
+
+  uint16_t profileBasal[24];
 
   uint16_t currentTarget;
   uint16_t currentCIR;

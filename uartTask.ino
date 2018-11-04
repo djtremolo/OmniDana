@@ -260,7 +260,7 @@ static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t
 {
   int ret = -1;
 
-  if (plBuf && plLen <= DANA_MAX_PAYLOAD_LENGTH)
+  if(plLen <= DANA_MAX_PAYLOAD_LENGTH)
   {
     Crc16 crc;
     int idx = 0;
@@ -281,9 +281,18 @@ static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t
     rawBuf[idx++] = code;
 
     /*payload: params*/
-    for (uint8_t i = 0; i < plLen; i++)
+    if(plBuf != NULL)
     {
-      rawBuf[idx++] = plBuf[i];
+      /*user data comes from external buffer*/
+      for (uint8_t i = 0; i < plLen; i++)
+      {
+        rawBuf[idx++] = plBuf[i];
+      }
+    }
+    else
+    {
+      /*user data is already at the correct position in rawBuf. Just jumping to next phase.*/
+      idx += plLen;
     }
 
     crc.clearCrc();
@@ -546,16 +555,17 @@ static int handlePayload(OmniDanaContext_t *ctx, DanaMessage_t *dMsg)
   return ret;
 }
 
-#define ENC_MAX_PAYLOAD_ALLOCATION 10
+
 
 static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
 {
   int ret = -1;
-  uint8_t rawBuf[DANA_RAW_MSG_LEN(ENC_MAX_PAYLOAD_ALLOCATION)];
-  uint8_t tempBuf[ENC_MAX_PAYLOAD_ALLOCATION];
+  uint8_t rawBuf[DANA_RAW_MSG_LEN(DANA_MAX_PAYLOAD_LENGTH)];
+  uint8_t *tempBuf = &(rawBuf[5]); 
+  uint8_t *msgPtr = tempBuf;
   int outLen;
   uint16_t tmpu16;
-  uint8_t *pkBuf = tempBuf;
+  uint8_t tmpu8;
 
 #if DEBUG_PRINT
   Serial.print(F("handleTypeEncryptionRequest, code = "));
@@ -570,7 +580,10 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
     Serial.println(F("handleTypeEncryptionRequest: OE_PUMP_CHECK"));
 #endif
 
-    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PUMP_CHECK, (uint8_t *)"OK", 2);
+    msgPutU8(&msgPtr, 'O');
+    msgPutU8(&msgPtr, 'K');
+
+    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PUMP_CHECK, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -593,16 +606,16 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
 
     ctx->pump.pass = 7493;
 
+    tmpu8 = 1;  //result fail by default
     if (tmpu16 == ((ctx->pump.pass) ^ 0x3463))
     {
       /*pairing ok, continue to time info*/
-      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_CHECK_PASSKEY, (uint8_t *)"\0", 1);
+      tmpu8 = 0;
     }
-    else
-    {
-      /*pairing not ok, request pairing*/
-      outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_CHECK_PASSKEY, (uint8_t *)"\001", 1);
-    }
+
+    msgPutU8(&msgPtr, tmpu8);
+
+    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_CHECK_PASSKEY, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -616,28 +629,27 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
 #if DEBUG_PRINT
     Serial.println(F("handleTypeEncryptionRequest: OE_PASSKEY_REQUEST"));
 #endif
-    pkBuf = tempBuf;
 
     /*send OK response*/
-    msgPutU8(&pkBuf, 0);
+    msgPutU8(&msgPtr, 0);
 
-    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PASSKEY_REQUEST, tempBuf, msgLen(tempBuf, pkBuf)); /*0 = ok, continue*/
+    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PASSKEY_REQUEST, NULL, msgLen(tempBuf, msgPtr));
     ctx->pump.pairingRequested = true;
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
 
     /*simulate user latency*/
-    BlinkLed(20);
+    BlinkLed(5);
 
-    pkBuf = tempBuf;
+    msgPtr = tempBuf;
 
     /*and then send OK : pairing button pressed*/
     ctx->pump.pass = 7493;
 
-    msgPutU16(&pkBuf, (ctx->pump.pass) ^ 0x3463);
+    msgPutU16(&msgPtr, (ctx->pump.pass) ^ 0x3463);
 
-    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PASSKEY_RETURN, tempBuf, msgLen(tempBuf, pkBuf));
+    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PASSKEY_RETURN, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -652,13 +664,11 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
     Serial.println(F("handleTypeEncryptionRequest: OE_TIME_INFORMATION"));
 #endif
 
-    pkBuf = tempBuf;
-
     ctx->pump.pass = 7493;
 
-    msgPutU16(&pkBuf, (ctx->pump.pass) ^ 3463);
+    msgPutU16(&msgPtr, (ctx->pump.pass) ^ 3463);
 
-    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_TIME_INFORMATION, tempBuf, msgLen(tempBuf, pkBuf)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_TIME_INFORMATION, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -743,13 +753,12 @@ static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, 
   return ret;
 }
 
-#define RESP_MAX_PAYLOAD_ALLOCATION 32
 
 static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
 {
   int ret = -1;
-  uint8_t rawBuf[DANA_RAW_MSG_LEN(RESP_MAX_PAYLOAD_ALLOCATION)];
-  uint8_t tempBuf[RESP_MAX_PAYLOAD_ALLOCATION];
+  uint8_t rawBuf[DANA_RAW_MSG_LEN(DANA_MAX_PAYLOAD_LENGTH)];
+  uint8_t *tempBuf = &(rawBuf[5]);
   uint8_t *msgPtr = tempBuf;
   int outLen;
 
@@ -782,7 +791,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAbsoluteRate * 100.0));
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.iob * 100.0));
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_INITIAL_SCREEN_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_INITIAL_SCREEN_INFORMATION, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -901,7 +910,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
       msgPutU8(&msgPtr, ctx->pump.shippingCountry[i]);
     }
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_GET_SHIPPING_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_GET_SHIPPING_INFORMATION, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -923,7 +932,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU8(&msgPtr, ctx->pump.protocol);
     msgPutU8(&msgPtr, ctx->pump.productCode);
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_GET_PUMP_CHECK, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_GET_PUMP_CHECK, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -971,13 +980,10 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     Serial.println(F("handleTypeResponse: OBO_GET_STEP_BOLUS_INFORMATION"));
 #endif
 
-    ctx->pump.bolusType = 0;
-    ctx->pump.initialBolusAmount = 4.0;
-    ctx->pump.lastBolusTimeHour = 18;
-    ctx->pump.lastBolusTimeMinute = 47;
-    ctx->pump.lastBolusAmount = 5.0;
-    ctx->pump.maxBolus = 24;
-    ctx->pump.bolusStep = 0.10;
+ctx->pump.bolusType = 0;
+ctx->pump.lastBolusAmount = 5.0;
+ctx->pump.maxBolus = 24;
+ctx->pump.bolusStep = 0.10;
 
     msgPutU8(&msgPtr, ctx->pump.error);
 
@@ -989,7 +995,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.maxBolus * 100.0));
     msgPutU8(&msgPtr, (uint8_t)(ctx->pump.bolusStep * 100.0));
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_STEP_BOLUS_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr));
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_STEP_BOLUS_INFORMATION, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1011,7 +1017,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU16(&msgPtr, ctx->pump.extendedBolusSoFarInMinutes);
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.extendedBolusDeliveredSoFar * 100.0));
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_EXTENDED_BOLUS_STATE, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_EXTENDED_BOLUS_STATE, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1068,13 +1074,54 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
       Serial.println(F("handleTypeResponse: OBO_SET_EXTENDED_BOLUS_CANCEL"));
 #endif
       break;
-
+#endif
     case OBO_SET_STEP_BOLUS_START:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_STEP_BOLUS_START"));
 #endif
-      break;
+
+      msgGetU8(&buf);
+
+      { //variable scope
+        uint16_t amountU16 = msgGetU16(&buf);
+        uint8_t speed = msgGetU8(&buf);
+
+        float amount = (float)amountU16 / 100.0;
+
+#if DEBUG_PRINT
+        Serial.print(F("amount = "));
+        Serial.print(amountU16, DEC);
+        Serial.println(F("/100 u."));
 #endif
+        time_t t = now();
+
+
+
+        ctx->pump.bolusType = 0;
+        ctx->pump.initialBolusAmount = 0.0;
+        ctx->pump.lastBolusTimeHour = (uint8_t)hour(t);
+        ctx->pump.lastBolusTimeMinute = (uint8_t)minute(t);
+        ctx->pump.lastBolusAmount = amount;
+        ctx->pump.maxBolus = 24;
+        ctx->pump.bolusStep = 0.10;
+
+        ctx->pump.iob += amount;
+
+
+
+      }
+
+      msgPutU8(&msgPtr, 0);   //result == OK
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_SET_STEP_BOLUS_START, NULL, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+
+      /*mark ok*/
+      ret = 0;
+      break;
+
   case OBO_GET_CALCULATION_INFORMATION:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBO_GET_CALCULATION_INFORMATION"));
@@ -1083,7 +1130,6 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     ctx->pump.currentTarget = 5;
     ctx->pump.currentCIR = 20;
     ctx->pump.currentCF = 6;
-    ctx->pump.iob = 4.5;
     ctx->pump.units = UNITS_MMOL;
 
     msgPutU8(&msgPtr, ctx->pump.error);
@@ -1095,7 +1141,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.iob * 100.0));
     msgPutU8(&msgPtr, ctx->pump.units);
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_CALCULATION_INFORMATION, tempBuf, msgLen(tempBuf, msgPtr));
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_CALCULATION_INFORMATION, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1136,6 +1182,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU8(&msgPtr, ctx->pump.units);
 
     msgPutU16(&msgPtr, ctx->pump.morningCIR);
+    msgPutU16(&msgPtr, 0);
     msgPutU16(&msgPtr, ctx->pump.afternoonCIR);
     msgPutU16(&msgPtr, 0);
     msgPutU16(&msgPtr, ctx->pump.eveningCIR);
@@ -1150,7 +1197,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU16(&msgPtr, 0);
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.nightCF * 100.0));
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_CIR_CF_ARRAY, tempBuf, msgLen(tempBuf, msgPtr));
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_CIR_CF_ARRAY, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1182,7 +1229,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     for (int i = 0; i < 16; i++)
       msgPutU8(&msgPtr, 0);
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_BOLUS_OPTION, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_BOLUS_OPTION, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1216,7 +1263,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU8(&msgPtr, ctx->pump.tempBasalDurationHour); /*TODO: 150==15min, 160==30min, otherwise hour*3600*/
     msgPutU16(&msgPtr, ctx->pump.tempBasalRunningMin);
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_TEMPORARY_BASAL_STATE, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_TEMPORARY_BASAL_STATE, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1236,11 +1283,9 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     Serial.println(F("handleTypeResponse: OBA_GET_PROFILE_NUMBER"));
 #endif
 
-    ctx->pump.activeProfile = 2;
-
     msgPutU8(&msgPtr, ctx->pump.activeProfile);
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_GET_PROFILE_NUMBER, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_GET_PROFILE_NUMBER, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1250,42 +1295,78 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 
     break;
 
-#if 0
+
     case OBA_SET_PROFILE_NUMBER:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBA_SET_PROFILE_NUMBER"));
 #endif
-      break;
 
+      (void)msgGetU8(&buf);   //skip len
+
+      ctx->pump.activeProfile = msgGetU8(&buf);
+
+      msgPutU8(&msgPtr, 0); //OK
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_SET_PROFILE_NUMBER, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+
+      /*mark ok*/
+      ret = 0;
+
+
+      break;
+#if 0
     case OBA_GET_PROFILE_BASAL_RATE:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBA_GET_PROFILE_BASAL_RATE"));
 #endif
       break;
+#endif
 
     case OBA_SET_PROFILE_BASAL_RATE:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBA_SET_PROFILE_BASAL_RATE"));
 #endif
+
+      (void)msgGetU8(&buf);   //skip len
+
+      ctx->pump.activeProfile = msgGetU8(&buf);
+      
+      for(int i=0; i<24; i++)
+      {
+        ctx->pump.profileBasal[i] = msgGetU16(&buf);
+      }
+
+      msgPutU8(&msgPtr, 0); //OK
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_SET_PROFILE_BASAL_RATE, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+
+      /*mark ok*/
+      ret = 0;
       break;
-#endif
+
   case OBA_GET_BASAL_RATE:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBA_GET_BASAL_RATE"));
 #endif
 
     ctx->pump.maxBasal = 4.0;
-    ctx->pump.basalStep = 0.1; /*float as u8*/
+    ctx->pump.basalStep = 0.01; /*float as u8*/   /*MUST be 0.01, otherwise there will be a notification about this*/
 
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.maxBasal * 100.0));
     msgPutU8(&msgPtr, (uint8_t)(ctx->pump.basalStep * 100.0));
 
     for (int i = 0; i < 24; i++)
     {
-      msgPutU16(&msgPtr, 0); /*pump profile basals - not supported, so send zero*/
+      msgPutU16(&msgPtr, ctx->pump.profileBasal[i]);
     }
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_GET_BASAL_RATE, tempBuf, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_GET_BASAL_RATE, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1328,7 +1409,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
       msgPutU8(&msgPtr, (uint8_t)second(t));
     }
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OO_GET_PUMP_TIME, tempBuf, msgLen(tempBuf, msgPtr));
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OO_GET_PUMP_TIME, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1339,7 +1420,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 
   case OO_SET_PUMP_TIME:
 #if DEBUG_PRINT
-    Serial.println(F("handleTypeResponse: OO_SET_PUMP_TIME")); /*F removed!*/
+    Serial.println(F("handleTypeResponse: OO_SET_PUMP_TIME"));
 #endif
 
     if (msgGetU8(&buf) == 6)
@@ -1360,7 +1441,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 
     msgPutU8(&msgPtr, 0); /*time set ok*/
 
-    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OO_SET_PUMP_TIME, tempBuf, msgLen(tempBuf, msgPtr));
+    outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OO_SET_PUMP_TIME, NULL, msgLen(tempBuf, msgPtr));
 
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
@@ -1397,7 +1478,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 
       msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
 
-      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OO_SET_PUMP_TIME, tempBuf, msgLen(tempBuf, msgPtr));
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OA_HISTORY_EVENTS, NULL, msgLen(tempBuf, msgPtr));
 
       /*send if a response was created*/
       sendToAAPS(ctx, rawBuf, outLen);
