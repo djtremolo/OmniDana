@@ -9,9 +9,9 @@ void BlinkLed(int times)
   while(times--)
   {
     digitalWrite(LED_BUILTIN, HIGH);
-    vTaskDelay( 500 / portTICK_PERIOD_MS );
+    vTaskDelay( 250 / portTICK_PERIOD_MS );
     digitalWrite(LED_BUILTIN, LOW);
-    vTaskDelay( 500 / portTICK_PERIOD_MS );
+    vTaskDelay( 250 / portTICK_PERIOD_MS );
   }
 }
 

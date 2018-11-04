@@ -1,7 +1,6 @@
 #include "common.h"
 #include "fbTask.h"
 
-#define POLLING_TIME_MS     1000
 
 void fbTaskInitialize(OmniDanaContext_t *ctx)
 {
@@ -10,7 +9,7 @@ void fbTaskInitialize(OmniDanaContext_t *ctx)
   xTaskCreate(
     fbTask
     ,  (const portCHAR *)"fbTask"   // A name just for humans
-    ,  100  // Stack size
+    ,  128  // Stack size
     ,  (void*)ctx
     ,  FB_TASK_PRIORITY  // priority
     ,  NULL );
@@ -35,6 +34,6 @@ void fbTask(void *pvParameters)
 
     //clockUpdate();  /*do this somewhere*/
 
-    vTaskDelay( POLLING_TIME_MS / portTICK_PERIOD_MS ); // wait for one second
+    vTaskDelay( 100 / portTICK_PERIOD_MS ); // wait for one second
   }
 }
