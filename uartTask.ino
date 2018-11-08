@@ -6,7 +6,7 @@
 #define START_CHAR 0xA5
 #define STOP_CHAR 0x5A
 
-#define DEBUG_PRINT true
+#define DEBUG_PRINT false
 #define ERROR_PRINT true
 #define IDLE_COUNTER_MAX 100
 

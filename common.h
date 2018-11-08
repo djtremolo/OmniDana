@@ -10,9 +10,9 @@
 
 
 /*TASK PRIORITIES*/
-#define UART_TASK_PRIORITY            2
-#define CTRL_TASK_PRIORITY            4
-#define FB_TASK_PRIORITY              5
+#define UART_TASK_PRIORITY            1
+#define CTRL_TASK_PRIORITY            2
+#define FB_TASK_PRIORITY              3
 
 /*DANARS MESSAGE SIZES*/
 #define DANA_MAX_PAYLOAD_LENGTH       60
