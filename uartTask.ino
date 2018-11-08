@@ -7,6 +7,7 @@
 #define STOP_CHAR 0x5A
 
 #define DEBUG_PRINT true
+#define ERROR_PRINT true
 #define IDLE_COUNTER_MAX 100
 
 typedef enum
@@ -113,7 +114,6 @@ static void uartTask(void *pvParameters);
 static void sendToAAPS(OmniDanaContext_t *ctx, uint8_t *buf, int len);
 static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame);
 static void incomingFrameInitialize(danaFrame_t *frame);
-static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame);
 static void incomingFrameFollow(danaFrame_t *frame, uint8_t inByte);
 static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t *plBuf, uint8_t plLen);
 
@@ -123,6 +123,12 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
 static int handleTypeCommand(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len);
 static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len);
 static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len);
+
+static int notifyDeliveryRateDisplay(OmniDanaContext_t *ctx, uint8_t *rawBuf, uint16_t deliveredInsulin, bool done);
+
+
+static uint8_t rawBuf[DANA_RAW_MSG_LEN(DANA_MAX_PAYLOAD_LENGTH)];
+
 
 void uartTaskInitialize(OmniDanaContext_t *ctx)
 {
@@ -167,37 +173,6 @@ static void uartTask(void *pvParameters)
     }
   }
 }
-/*
-static bool sendToAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
-{
-  bool ret = false;
-
-  //do not send while we are receiving. TODO: Check if this is really needed? BTLE should be full duplex?
-  if(frame->isBusy == false)
-  {
-    
-    size_t len = xMessageBufferReceive(ctx->commToRecBuffer, (void*)ctx->uartTaskMsg, sizeof(DanaMessage_t), 0);
-    if(len == sizeof(DanaMessage_t))
-    {
-      int outLen;
-
-      outLen = createOutMessage(ctx->uartTaskRawMsg, ctx->uartTaskMsg);
-
-      if(outLen > 0)
-      {
-        size_t sentBytes = Serial.write(ctx->uartTaskRawMsg, outLen);
-
-        if(sentBytes == outLen)
-        {
-          ret = true;
-        }
-      }
-    }
-  }
-
-  return ret;
-}
-*/
 
 static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
 {
@@ -256,7 +231,7 @@ static bool receiveFromAAPS(OmniDanaContext_t *ctx, danaFrame_t *frame)
   return ret;
 }
 
-static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t *plBuf, uint8_t plLen)
+static int createOutMessage(uint8_t *dBuf, uint8_t type, uint8_t code, uint8_t *plBuf, uint8_t plLen)
 {
   int ret = -1;
 
@@ -264,21 +239,20 @@ static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t
   {
     Crc16 crc;
     int idx = 0;
-    uint8_t tmp;
     uint8_t lenField = plLen + 2;
 
     /*start*/
-    rawBuf[idx++] = START_CHAR;
-    rawBuf[idx++] = START_CHAR;
+    dBuf[idx++] = START_CHAR;
+    dBuf[idx++] = START_CHAR;
 
     /*len*/
-    rawBuf[idx++] = lenField;
+    dBuf[idx++] = lenField;
 
     /*cmd1: type*/
-    rawBuf[idx++] = type;
+    dBuf[idx++] = type;
 
     /*cmd1: cmd*/
-    rawBuf[idx++] = code;
+    dBuf[idx++] = code;
 
     /*payload: params*/
     if(plBuf != NULL)
@@ -286,27 +260,27 @@ static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t
       /*user data comes from external buffer*/
       for (uint8_t i = 0; i < plLen; i++)
       {
-        rawBuf[idx++] = plBuf[i];
+        dBuf[idx++] = plBuf[i];
       }
     }
     else
     {
-      /*user data is already at the correct position in rawBuf. Just jumping to next phase.*/
+      /*user data is already at the correct position in dBuf. Just jumping to next phase.*/
       idx += plLen;
     }
 
     crc.clearCrc();
-    uint16_t crcValue = crc.XModemCrc(rawBuf, 3, lenField);
+    uint16_t crcValue = crc.XModemCrc(dBuf, 3, lenField);
 
     /*crc1*/
-    rawBuf[idx++] = (uint8_t)((crcValue >> 8) & 0xFF);
+    dBuf[idx++] = (uint8_t)((crcValue >> 8) & 0xFF);
 
     /*crc2*/
-    rawBuf[idx++] = (uint8_t)(crcValue & 0xFF);
+    dBuf[idx++] = (uint8_t)(crcValue & 0xFF);
 
     /*stop*/
-    rawBuf[idx++] = STOP_CHAR;
-    rawBuf[idx++] = STOP_CHAR;
+    dBuf[idx++] = STOP_CHAR;
+    dBuf[idx++] = STOP_CHAR;
 
     ret = idx;
   }
@@ -314,31 +288,6 @@ static int createOutMessage(uint8_t *rawBuf, uint8_t type, uint8_t code, uint8_t
   return ret;
 }
 
-/*
-
-static int incomingFrameSendToCommTask(MessageBufferHandle_t msgBuf, danaFrame_t *frame)
-{
-  int ret = 0;
-  DanaMessage_t *dMsg = &(frame->danaMsg);
-  uint8_t bytesSent = xMessageBufferSend(msgBuf, (void*)dMsg->buf, sizeof(DanaMessage_t), portMAX_DELAY);
-
-#if DEBUG_PRINT
-  Serial.print(F("incomingFrameSendToCommTask: sent "));
-  Serial.print(bytesSent, DEC);
-  Serial.println(F(" bytes."));
-#endif
-
-  if(bytesSent != sizeof(DanaMessage_t))
-  {
-#if DEBUG_PRINT
-    Serial.println(F("uartTask: TX BUF FULL"));
-#endif
-    ret = -1;
-  }
-
-  return ret;
-}
-*/
 // A5 A5 LEN TYPE CODE PARAMS CHECKSUM1 CHECKSUM2 5A 5A
 //           ^---- LEN -----^
 // total packet length 2 + 1 + readBuffer[2] + 2 + 2
@@ -560,12 +509,14 @@ static int handlePayload(OmniDanaContext_t *ctx, DanaMessage_t *dMsg)
 static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
 {
   int ret = -1;
-  uint8_t rawBuf[DANA_RAW_MSG_LEN(DANA_MAX_PAYLOAD_LENGTH)];
+//  uint8_t rawBuf[DANA_RAW_MSG_LEN(DANA_MAX_PAYLOAD_LENGTH)];
   uint8_t *tempBuf = &(rawBuf[5]); 
   uint8_t *msgPtr = tempBuf;
   int outLen;
   uint16_t tmpu16;
   uint8_t tmpu8;
+
+  (void)len;
 
 #if DEBUG_PRINT
   Serial.print(F("handleTypeEncryptionRequest, code = "));
@@ -678,7 +629,7 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
     break;
 
   default:
-#if DEBUG_PRINT
+#if ERROR_PRINT
     Serial.print(F("handleTypeEncryptionRequest: unimplemented code "));
     Serial.print(code, HEX);
     Serial.println(F("."));
@@ -693,10 +644,14 @@ static int handleTypeCommand(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf,
 {
   int ret = -1;
 
+  (void)ctx;
+  (void)buf;
+  (void)len;
+
   switch (code)
   {
   default:
-#if DEBUG_PRINT
+#if ERROR_PRINT
     Serial.print(F("handleTypeCommand: unimplemented code "));
     Serial.print(code, HEX);
     Serial.println(F("."));
@@ -710,6 +665,10 @@ static int handleTypeCommand(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf,
 static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
 {
   int ret = -1;
+
+  (void)ctx;
+  (void)buf;
+  (void)len;
 
 #if DEBUG_PRINT
   Serial.println(F("handleTypeEncryptionRequest"));
@@ -742,7 +701,7 @@ static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, 
     break;
 
   default:
-#if DEBUG_PRINT
+#if ERROR_PRINT
     Serial.print(F("handleTypeNotify: unimplemented code "));
     Serial.print(code, HEX);
     Serial.println(F("."));
@@ -753,14 +712,36 @@ static int handleTypeNotify(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, 
   return ret;
 }
 
+static int notifyDeliveryRateDisplay(OmniDanaContext_t *ctx, uint8_t *dBuf, uint16_t deliveredInsulin, bool done)
+{
+  int ret = -1;
+  if(dBuf)
+  {
+    uint8_t *tempBuf = &(dBuf[5]);
+    uint8_t *msgPtr = tempBuf;
+    int outLen;
+
+    msgPutU16(&msgPtr, (uint16_t)deliveredInsulin);
+
+    outLen = createOutMessage(dBuf, TYPE_NOTIFY, (done ? ON_DELIVERY_COMPLETE : ON_DELIVERY_RATE_DISPLAY), NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+    /*send if a response was created*/
+    sendToAAPS(ctx, dBuf, outLen);
+
+    ret = 0;
+  }
+  return ret;
+}
+
 
 static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf, uint8_t len)
 {
   int ret = -1;
-  uint8_t rawBuf[DANA_RAW_MSG_LEN(DANA_MAX_PAYLOAD_LENGTH)];
   uint8_t *tempBuf = &(rawBuf[5]);
   uint8_t *msgPtr = tempBuf;
   int outLen;
+
+  (void)len;
 
   switch (code)
   {
@@ -981,9 +962,9 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 #endif
 
 ctx->pump.bolusType = 0;
-ctx->pump.lastBolusAmount = 5.0;
+//ctx->pump.lastBolusAmount = 5.0;
 ctx->pump.maxBolus = 24;
-ctx->pump.bolusStep = 0.10;
+ctx->pump.bolusStep = 0.05;
 
     msgPutU8(&msgPtr, ctx->pump.error);
 
@@ -1038,13 +1019,29 @@ ctx->pump.bolusStep = 0.10;
       Serial.println(F("handleTypeResponse: OBO_GET_DUAL_BOLUS"));
 #endif
       break;
+#endif
+
+
 
     case OBO_SET_STEP_BOLUS_STOP:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_STEP_BOLUS_STOP"));
 #endif
+
+
+      msgPutU8(&msgPtr, 0);   //result == OK
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_SET_STEP_BOLUS_STOP, NULL, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+
+
+
       break;
 
+
+#if 0
     case OBO_GET_CARBOHYDRATE_CALCULATION_INFORMATION:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_GET_CARBOHYDRATE_CALCULATION_INFORMATION"));
@@ -1086,6 +1083,8 @@ ctx->pump.bolusStep = 0.10;
         uint16_t amountU16 = msgGetU16(&buf);
         uint8_t speed = msgGetU8(&buf);
 
+        (void)speed;
+
         float amount = (float)amountU16 / 100.0;
 
 #if DEBUG_PRINT
@@ -1095,6 +1094,13 @@ ctx->pump.bolusStep = 0.10;
 #endif
         time_t t = now();
 
+        TreatmentMessage_t tr;
+        tr.treatment = TREATMENT_BOLUS_START;
+        tr.param1 = amountU16;
+        tr.param2 = 0;
+        xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
+
+
 
 
         ctx->pump.bolusType = 0;
@@ -1103,20 +1109,40 @@ ctx->pump.bolusStep = 0.10;
         ctx->pump.lastBolusTimeMinute = (uint8_t)minute(t);
         ctx->pump.lastBolusAmount = amount;
         ctx->pump.maxBolus = 24;
-        ctx->pump.bolusStep = 0.10;
+    //    ctx->pump.bolusStep = 0.05;
 
-        ctx->pump.iob += amount;
+
+
+
+
+
+
+
+        msgPutU8(&msgPtr, 0);   //result == OK
+
+        outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_SET_STEP_BOLUS_START, NULL, msgLen(tempBuf, msgPtr));
+
+        /*send if a response was created*/
+        sendToAAPS(ctx, rawBuf, outLen);
+
+
+
+
+        /*1u: 20 clicks, takes 39sec -> 1 click takes 2 seconds. 1 click == 0.05u -> amountU16 = 5. Required clicks = amountU16 / 5*/
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+        uint16_t numberOfClicks = amountU16 / 5;
+        for(uint16_t x=0; x<numberOfClicks; x++)
+        {
+          notifyDeliveryRateDisplay(ctx, rawBuf, (x+1)*5, (x==(numberOfClicks-1)));
+          vTaskDelay(2000 / portTICK_PERIOD_MS);
+          ctx->pump.iob += ctx->pump.bolusStep;
+        }
+
 
 
 
       }
-
-      msgPutU8(&msgPtr, 0);   //result == OK
-
-      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_SET_STEP_BOLUS_START, NULL, msgLen(tempBuf, msgPtr));
-
-      /*send if a response was created*/
-      sendToAAPS(ctx, rawBuf, outLen);
 
       /*mark ok*/
       ret = 0;
@@ -1513,7 +1539,7 @@ ctx->pump.bolusStep = 0.10;
 #endif
 
   default:
-#if DEBUG_PRINT
+#if ERROR_PRINT
     Serial.print(F("handleTypeResponse: unimplemented code "));
     Serial.print(code, HEX);
     Serial.println(F("."));
@@ -1554,34 +1580,3 @@ static void sendToAAPS(OmniDanaContext_t *ctx, uint8_t *buf, int len)
   }
 }
 
-#if 0
-
-static int danaMsgPumpCheck(OmniDanaContext_t *ctx, uint8_t *buf, uint8_t len)
-{
-  int ret = -1;
-  uint8_t rawBuf[DANA_RAW_MSG_LEN(2)];  /*payload = 2bytes*/
-
-  int outLen = createOutMessage(rawBuf, RSP_PUMP_CHECK, "OK", 2);
-  
-  /*send if a response was created*/
-  sendToAAPS(ctx, rawBuf, outLen);
-
-  return ret;
-}
-
-static int danaMsgPumpPasskeyRequest(OmniDanaContext_t *ctx, uint8_t *buf, uint8_t len)
-{
-  int ret = -1;
-  uint8_t rawBuf[DANA_RAW_MSG_LEN(2)];  /*payload = 2bytes*/
-
-  int outLen = createOutMessage(rawBuf, RSP_PUMP_PASSKEY_REQUEST, "11", 2);   /*just non zero is fine to ask for pairing request*/
-  sendToAAPS(ctx, rawBuf, outLen);
-
-  /*wait here?*/
-
-  outLen = createOutMessage(rawBuf, RSP_PUMP_CHECK_PASSKEY_RETURN, "ak", 2);
-  sendToAAPS(ctx, rawBuf, outLen);
-
-  return ret;
-}
-#endif

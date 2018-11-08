@@ -152,7 +152,7 @@ unsigned int Crc16::fastCrc(uint8_t data[], uint8_t start, uint16_t length, uint
 
 	if (length == 0) return crc;
 
-	for (int i = start; i < (start + length); i++)
+	for (int i = (int)start; i < (int)(start + length); i++)
 	{
 		c = data[i];
 

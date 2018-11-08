@@ -6,7 +6,6 @@ uint8_t msgLen(uint8_t *start, uint8_t *currentPosition)
   size_t a = (size_t)start;
   size_t b = (size_t)currentPosition;
 
-  uint8_t len = (a < b) ? (uint8_t)(b - a) : 0; 
   return (uint8_t)(b - a);
 }
 

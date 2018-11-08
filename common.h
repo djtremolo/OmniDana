@@ -3,6 +3,8 @@
 
 #include <Arduino_FreeRTOS.h>
 #include "message_buffer.h"
+#include "timers.h"
+#include "semphr.h"
 #include "ioInterface.h"
 #include <Time.h>
 
@@ -41,9 +43,13 @@ typedef struct
 
 typedef enum
 {
-  TREATMENT_BOLUS,
-  TREATMENT_EXTENDED_BOLUS,
-  TREATMENT_TEMPORARY_BASAL_RATE
+  TREATMENT_BOLUS_START,
+  TREATMENT_BOLUS_STOP,
+  TREATMENT_EXTENDED_BOLUS_START,
+  TREATMENT_EXTENDED_BOLUS_STOP,
+  TREATMENT_TEMPORARY_BASAL_RATE_START,
+  TREATMENT_TEMPORARY_BASAL_RATE_STOP
+
 } TreatmentType_t;
 
 typedef struct
@@ -158,7 +164,6 @@ typedef struct
   DanaRSPump_t pump;
 } OmniDanaContext_t;
 
-extern time_t mySoftRTC;
 
 
 /*MESSAGE BUFFER SIZES*/
@@ -168,7 +173,6 @@ extern time_t mySoftRTC;
 
 
 void BlinkLed(int times);
-void clockUpdate();
 
 
 #endif//__OMNIDANACOMMON_H__

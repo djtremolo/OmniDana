@@ -9,7 +9,7 @@ void fbTaskInitialize(OmniDanaContext_t *ctx)
   xTaskCreate(
     fbTask
     ,  (const portCHAR *)"fbTask"   // A name just for humans
-    ,  128  // Stack size
+    ,  60  // Stack size
     ,  (void*)ctx
     ,  FB_TASK_PRIORITY  // priority
     ,  NULL );
@@ -19,6 +19,7 @@ void fbTaskInitialize(OmniDanaContext_t *ctx)
 void fbTask(void *pvParameters)
 {
   OmniDanaContext_t *ctx = (OmniDanaContext_t*)pvParameters;
+  (void)ctx;
 
   #if DEBUG_PRINT
   Serial.print(F("fbTask: starting with ctx = "));
@@ -34,6 +35,6 @@ void fbTask(void *pvParameters)
 
     //clockUpdate();  /*do this somewhere*/
 
-    vTaskDelay( 100 / portTICK_PERIOD_MS ); // wait for one second
+    vTaskDelay( 1000 / portTICK_PERIOD_MS ); // wait for one second
   }
 }

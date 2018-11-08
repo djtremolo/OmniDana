@@ -15,10 +15,6 @@ void BlinkLed(int times)
   }
 }
 
-/*INTERNAL DATA*/
-//static DanaMessage_t commTaskMsg;
-static DanaMessage_t uartTaskMsg;
-static uint8_t uartTaskRawMsg[DANA_MAX_BUF_LEN];
 
 
 static OmniDanaContext_t odContext;

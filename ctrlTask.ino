@@ -2,8 +2,7 @@
 #include "ctrlTask.h"
 #include "ioInterface.h"
 
-#define DEBUG_PRINT               true
-#define MAX_STEPS_IN_SEQUENCE     20
+#define MAX_STEPS_IN_SEQUENCE     10
 
 typedef enum
 {
@@ -23,8 +22,13 @@ typedef struct
 sequenceStep_t keySequence[MAX_STEPS_IN_SEQUENCE];
 uint8_t keySequenceStepCount;
 
+TimerHandle_t tickTimer;
+SemaphoreHandle_t tickSemaphore;
+
+
 static void handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr);
 static void ctrlTask(void *pvParameters);
+static void ctrlTaskTimerTick(TimerHandle_t xTimer);
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx);
 
@@ -32,14 +36,49 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
 {
   Serial.println(F("ctrlTaskInitialize"));
 
-  xTaskCreate(
+
+  tickTimer = xTimerCreate
+                 ( (const portCHAR *)"ctrlTaskTimer",
+                   1000 / portTICK_PERIOD_MS,     //one second
+                   pdTRUE,
+                   (void*)0,
+                   ctrlTaskTimerTick );
+
+  if(tickTimer == NULL)
+  {
+    Serial.println(F("xTimerCreate failed"));
+  }
+
+
+
+  tickSemaphore = xSemaphoreCreateBinary();
+  if(tickSemaphore == NULL)
+  {
+    Serial.println(F("xSemaphoreCreateBinary failed"));
+  }
+
+
+
+  if(xTaskCreate(
       ctrlTask, 
       (const portCHAR *)"ctrlTask",
       100,
       (void *)ctx, 
       CTRL_TASK_PRIORITY,
-      NULL);
+      NULL) != pdPASS)
+  {
+    Serial.println(F("xTaskCreate failed"));
+  }
 }
+
+static void ctrlTaskTimerTick(TimerHandle_t xTimer)
+{
+  (void)xTimer;
+
+  //Serial.println("Tick");
+  xSemaphoreGive(tickSemaphore);
+}
+
 
 static void ctrlTask(void *pvParameters)
 {
@@ -60,13 +99,21 @@ while(1)
 }
 */
 
+
   IoInterfaceSetupPins();
+
+  xTimerStart(tickTimer, 0);
 
   while (1)
   {
     TreatmentMessage_t treatment;
 
-    int recBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void *)&treatment, sizeof(TreatmentMessage_t), portMAX_DELAY);
+    /*wait for a tick*/
+    xSemaphoreTake(tickSemaphore, portMAX_DELAY);
+
+    //Serial.println("TICK");
+
+    int recBytes = xMessageBufferReceive(ctx->commToCtrlBuffer, (void *)&treatment, sizeof(TreatmentMessage_t), 0);
 
     if (recBytes == sizeof(TreatmentMessage_t))
     {
@@ -77,7 +124,13 @@ while(1)
       handleTreatment(ctx, &treatment);
     }
 
-    BlinkLed(10);
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+    digitalWrite(LED_BUILTIN, LOW);
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+    digitalWrite(LED_BUILTIN, HIGH);
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+    digitalWrite(LED_BUILTIN, LOW);
 
     /*and continue waiting for next...*/
   }
@@ -85,6 +138,8 @@ while(1)
 
 static void handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr)
 {
+  (void)ctx;
+  (void)tr;
 #if DEBUG_PRINT
   Serial.println(F("handleTreatment:"));
 #endif
