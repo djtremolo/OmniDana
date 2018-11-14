@@ -210,7 +210,13 @@ static void fbISR(void)
     timeFromLastChange = previousMillis[0] - previousMillis[1];   /*time diff between last rising edge and this falling edge*/ 
   }
 
-  /*stire time delta of previous pulse*/
+  /*count state changes but saturate at 4 as more would not make any difference*/
+  if(newStateChanges < MAX_PULSE_MEASUREMENTS)
+  {
+    newStateChanges++;
+  }
+
+  /*store time delta of previous pulse*/
   pulseTimes[pulseIdx] = timeFromLastChange;
 
   /*detect positive ack: two active pulses of 135ms, 115ms in between*/
