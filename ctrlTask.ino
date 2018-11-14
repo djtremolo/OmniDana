@@ -3,7 +3,7 @@
 #include "ctrlTask.h"
 #include "ioInterface.h"
 
-#define MAX_KEY_EVENTS                8
+#define MAX_KEY_EVENTS                4
 #define MAX_FB_EVENTS                 2
 
 #define KEY_PRESS_LENGTH_SHORT_IN_MS    130

@@ -12,7 +12,6 @@
 /*TASK PRIORITIES*/
 #define UART_TASK_PRIORITY            1
 #define CTRL_TASK_PRIORITY            2
-#define FB_TASK_PRIORITY              3
 
 /*DANARS MESSAGE SIZES*/
 #define DANA_MAX_PAYLOAD_LENGTH       60
@@ -26,7 +25,6 @@
 
 /*QUEUE LENGTHS - HOW MANY FULL MESSAGE FRAMES WILL FIT INTO MESSAGE QUEUE*/
 #define CTRL_TASK_QUEUE_LENGTH        4
-#define FB_TASK_QUEUE_LENGTH          10
 
 #define UNITS_MMOL                    1
 
@@ -165,7 +163,6 @@ typedef struct
 typedef struct
 {
   MessageBufferHandle_t commToCtrlBuffer;
-  MessageBufferHandle_t fbToCtrlBuffer;
   boolean fbPdmIsBusy;
   buttonKey_t ctrlActiveButton;
 
