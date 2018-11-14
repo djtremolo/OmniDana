@@ -2,7 +2,6 @@
 
 #include "uartTask.h"
 #include "ctrlTask.h"
-#include "fbTask.h"
 
 void BlinkLed(int times)
 {
@@ -31,10 +30,9 @@ void setup() {
   memset(&odContext, 0, sizeof(OmniDanaContext_t));
 
   odContext.commToCtrlBuffer = xMessageBufferCreate( COMM_TO_CTRL_BUFFER_SIZE );
-  odContext.fbToCtrlBuffer = xMessageBufferCreate( FB_TO_CTRL_BUFFER_SIZE );
 
   ctrlTaskInitialize(&odContext);
-  fbTaskInitialize(&odContext);
+  //fbTaskInitialize(&odContext);
   uartTaskInitialize(&odContext);
 
 }

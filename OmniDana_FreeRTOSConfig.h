@@ -43,7 +43,7 @@
  *----------------------------------------------------------*/
 
 // And on to the things the same no matter the AVR type...
-#define configUSE_PREEMPTION                0
+#define configUSE_PREEMPTION                1
 #define configUSE_IDLE_HOOK                 1
 #define configUSE_TICK_HOOK                 0
 #define configCPU_CLOCK_HZ                  ( ( uint32_t ) F_CPU )			// This F_CPU variable set by the environment
@@ -59,7 +59,7 @@
 #define configUSE_COUNTING_SEMAPHORES       0
 #define configUSE_QUEUE_SETS                0
 #define configQUEUE_REGISTRY_SIZE           0
-#define configUSE_TIME_SLICING              0
+#define configUSE_TIME_SLICING              1
 #define configCHECK_FOR_STACK_OVERFLOW      1
 #define configUSE_MALLOC_FAILED_HOOK        1
 

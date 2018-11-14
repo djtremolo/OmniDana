@@ -1,14 +1,14 @@
 #include "ioInterface.h"
 
-static void setupFeedbackPin(feedbackKey_t fb);
+static void setupFeedbackPin(feedbackKey_t fb, void (*fbFun)(void));
 static void setupButtonPin(buttonKey_t key);
 static void setPinState(uint8_t ioPin, pinState_t state);
 
 bool IoInterfaceReadFeedbackPin(feedbackKey_t fb);
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value);
-void IoInterfaceSetupPins();
+void IoInterfaceSetupPins(void (*fbFun)(void));
 
-void IoInterfaceSetupPins()
+void IoInterfaceSetupPins(void (*fbFun)(void))
 {
   uint8_t i;
 
@@ -19,18 +19,21 @@ void IoInterfaceSetupPins()
 
   for (i = 0; i < FB_MAX; i++)
   {
-    setupFeedbackPin((feedbackKey_t)i);
+    setupFeedbackPin((feedbackKey_t)i, fbFun);
   }
+
+
 }
 
-static void setupFeedbackPin(feedbackKey_t fb)
+static void setupFeedbackPin(feedbackKey_t fb, void (*fbFun)(void))
 {
   if (fb >= FB_MAX)
     return;
 
   uint8_t ioPin = GPIOFeedbackMapping[fb];
 
-  pinMode(ioPin, INPUT);
+  pinMode(ioPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ioPin), fbFun, CHANGE);
 }
 
 bool IoInterfaceReadFeedbackPin(feedbackKey_t fb)
@@ -50,6 +53,17 @@ bool IoInterfaceReadFeedbackPin(feedbackKey_t fb)
   return state;
 }
 
+
+static bool getPinState(uint8_t ioPin)
+{
+#if KEY_IO_MODE == IOMODE_NORMALLY_DOWN
+  return (digitalRead(ioPin) == 0 ? false : true);
+#else
+  return (digitalRead(ioPin) == 0 ? true : false);
+#endif
+}
+
+
 static void setPinState(uint8_t ioPin, pinState_t state)
 {
   vTaskSuspendAll();
@@ -64,8 +78,12 @@ static void setPinState(uint8_t ioPin, pinState_t state)
     pinMode(ioPin, OUTPUT);
     break;
   default:
-    digitalWrite(ioPin, LOW); /*make sure driving and pull-up are disabled*/
+    digitalWrite(ioPin, LOW); /*drive disabled*/
+  #if KEY_IO_PULLUP
+    pinMode(ioPin, INPUT_PULLUP);    /*set to input with pull up*/
+  #else
     pinMode(ioPin, INPUT);    /*set to input to enable HI-Z mode*/
+  #endif
     break;
   }
   xTaskResumeAll();
@@ -88,6 +106,15 @@ static void setupButtonPin(buttonKey_t key)
 #endif
 #endif
 }
+
+bool IoInterfaceReadButtonPin(buttonKey_t key)
+{
+  if (key >= KEY_MAX)
+    return false;
+
+  return getPinState(GPIOKeyMapping[key]);
+}
+
 
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value)
 {

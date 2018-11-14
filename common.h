@@ -57,15 +57,23 @@ typedef struct
   TreatmentType_t treatment;
   uint16_t param1;
   uint16_t param2;  
+  uint16_t param3;  
 } TreatmentMessage_t;
+
+typedef struct
+{
+  buttonKey_t key;
+  bool active;
+} KeyEvent_t;
 
 typedef enum
 {
-  FEEDBACK_OK,                    //double beeps
-  FEEDBACK_FAILURE,               //single beep
-  FEEDBACK_SCREAM_OF_DEATH,       //single continuous beep
-  FEEDBACK_USER_KEY_PRESS         //user pressed a button
-} FeedbackEvent_t;
+  FB_NONE,
+  FB_POSITIVE_ACK,
+  FB_NEGATIVE_ACK,
+  FB_SCREAM_OF_DEATH
+} FbEvent_t;
+
 
 typedef struct
 {
@@ -168,7 +176,6 @@ typedef struct
 
 /*MESSAGE BUFFER SIZES*/
 #define COMM_TO_CTRL_BUFFER_SIZE      ((sizeof(TreatmentMessage_t) + sizeof(size_t)) * CTRL_TASK_QUEUE_LENGTH )   /*treatment requests*/
-#define FB_TO_CTRL_BUFFER_SIZE        ((sizeof(FeedbackEvent_t) + sizeof(size_t)) * FB_TASK_QUEUE_LENGTH)         /*feedback events*/
 
 
 
