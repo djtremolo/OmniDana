@@ -21,6 +21,11 @@ static OmniDanaContext_t odContext;
 // the setup function runs once when you press reset or power the board
 void setup() {
 
+
+
+
+
+
   Serial.begin(115200);
 
   setTime(0,40,33,1,11,2018);
@@ -32,7 +37,6 @@ void setup() {
   odContext.commToCtrlBuffer = xMessageBufferCreate( COMM_TO_CTRL_BUFFER_SIZE );
 
   ctrlTaskInitialize(&odContext);
-  //fbTaskInitialize(&odContext);
   uartTaskInitialize(&odContext);
 
 }

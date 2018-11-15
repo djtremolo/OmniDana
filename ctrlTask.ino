@@ -2,6 +2,7 @@
 #include "common.h"
 #include "ctrlTask.h"
 #include "ioInterface.h"
+#include "avrtimer.h"
 
 #define MAX_KEY_EVENTS                4
 #define MAX_FB_EVENTS                 2
@@ -17,6 +18,17 @@ typedef enum
 
 #define BUTTON_STATE_ACTIVE_MASK    0x01
 #define BUTTON_STATE_SENT_MASK      0x02
+
+
+
+#define MAX_PULSE_MEASUREMENTS            4
+#define PREV_IDX(idx)                     ((idx) > 0 ? (idx)-1 : (MAX_PULSE_MEASUREMENTS - 1)) 
+#define NEXT_IDX(idx)                     (((idx)+1) % MAX_PULSE_MEASUREMENTS)
+
+#define CHECK_PULSE_LENGTH(pTime, minTime, maxTime)     ((((pTime)>=(minTime)) && ((pTime)<=(maxTime))) ? true : false) 
+
+#define FB_DEBOUNCING_TIME_MS         10
+
 
 static bool userActive = false;
 
@@ -39,11 +51,14 @@ static bool treatmentBolusStart(uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentBolusStop(uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentExtendedBolusStart(uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentExtendedBolusStop(uint16_t p1, uint16_t p2, uint16_t p3);
-
-
-
+static void fbISR(void);
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx);
+
+ISR(TIMER2_COMPA_vect)
+{
+  fbISR();
+}
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx)
 {
@@ -52,10 +67,10 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
   Serial.print(portTICK_PERIOD_MS, DEC);
   Serial.println(".");
 
+  timer2SetUp();
 
   keyQueue = xQueueCreate(MAX_KEY_EVENTS, sizeof(KeyEvent_t));
   fbQueue = xQueueCreate(MAX_FB_EVENTS, sizeof(FbEvent_t));
-
 
   tickTimer = xTimerCreate
                  ( (const portCHAR *)"ctrlTaskTimer",
@@ -69,20 +84,16 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
     Serial.println(F("xTimerCreate failed"));
   }
 
-
-
   tickSemaphore = xSemaphoreCreateBinary();
   if(tickSemaphore == NULL)
   {
     Serial.println(F("xSemaphoreCreateBinary failed"));
   }
 
-
-
   if(xTaskCreate(
       ctrlTask, 
       (const portCHAR *)"ctrlTask",
-      100,
+      250,
       (void *)ctx, 
       CTRL_TASK_PRIORITY,
       NULL) != pdPASS)
@@ -90,6 +101,7 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
     Serial.println(F("xTaskCreate failed"));
   }
 }
+
 static void checkUserKeypad()
 {
   bool keyActive = false;
@@ -176,105 +188,133 @@ static void ctrlTaskTimerTick(TimerHandle_t xTimer)
   }
 }
 
-#define MAX_PULSE_MEASUREMENTS            4
-#define PREV_IDX(idx)                     ((idx) > 0 ? (idx)-1 : (MAX_PULSE_MEASUREMENTS - 1)) 
-#define NEXT_IDX(idx)                     (((idx)+1) % MAX_PULSE_MEASUREMENTS)
-
-#define CHECK_PULSE_LENGTH(pTime, minTime, maxTime)     ((((pTime)>=(minTime)) && ((pTime)<=(maxTime))) ? true : false) 
-
 static void fbISR(void)
 {
-  static unsigned long pulseTimes[MAX_PULSE_MEASUREMENTS];
-  static uint8_t pulseIdx;
-  static unsigned long previousMillis[2] = {};
-  //static uint8_t pulsesRecorded = 0;
-  static uint8_t newStateChanges = 0;
-
-  cli();
+  static bool debouncingLastState = true;
+  static uint16_t consecutiveStates = 0;
+  static bool lastActionState = false;
 
   bool fbVal = IoInterfaceReadFeedbackPin(FB_BEEP);
   unsigned long currentMillis = millis();
   unsigned long timeFromLastChange;
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-  if(fbVal)
+
+  /*debounce until a steady signal is found*/
+  if(fbVal == debouncingLastState)
   {
-    /*rising edge*/
-    previousMillis[1] = currentMillis;
-    timeFromLastChange = previousMillis[1] - previousMillis[0];   /*time diff between last falling edge and this rising edge*/
+    if(consecutiveStates < FB_DEBOUNCING_TIME_MS)
+    {
+      consecutiveStates++;
+      return; /*not yet*/
+    }
   }
   else
   {
-    /*falling edge*/
-    previousMillis[0] = currentMillis;
-    timeFromLastChange = previousMillis[0] - previousMillis[1];   /*time diff between last rising edge and this falling edge*/ 
+    debouncingLastState = fbVal;
+    consecutiveStates = 0;
+    return;
   }
 
-  /*count state changes but saturate at 4 as more would not make any difference*/
-  if(newStateChanges < MAX_PULSE_MEASUREMENTS)
-  {
-    newStateChanges++;
-  }
+  digitalWrite(LED_BUILTIN, fbVal); //HIGH
 
-  /*store time delta of previous pulse*/
-  pulseTimes[pulseIdx] = timeFromLastChange;
-
-  /*detect positive ack: two active pulses of 135ms, 115ms in between*/
-  if((!fbVal) && (newStateChanges >= 4))
+  /*act only when the state has been changed*/
+  if(fbVal != lastActionState)
   {
-    uint8_t secondHighPulseIdx = pulseIdx;
-    uint8_t middleLowPulseIdx = PREV_IDX(secondHighPulseIdx);
-    uint8_t firstHighPulseIdx = PREV_IDX(middleLowPulseIdx);
-    /*at the low level now, measure last positive pulse*/
-    
-    if(CHECK_PULSE_LENGTH(pulseTimes[firstHighPulseIdx], 100, 200))
+    static unsigned long pulseTimes[MAX_PULSE_MEASUREMENTS];
+    static uint8_t pulseIdx;
+    static unsigned long previousMillis[2] = {};
+    static uint8_t newStateChanges = 0;
+  
+    /*store this state for change detection logic*/
+    lastActionState = fbVal;
+
+    /*measure pulse lengths*/
+    if(fbVal)
     {
-      if(CHECK_PULSE_LENGTH(pulseTimes[middleLowPulseIdx], 100, 200))
+      /*rising edge*/
+      previousMillis[1] = currentMillis;
+      timeFromLastChange = previousMillis[1] - previousMillis[0];   /*time diff between last falling edge and this rising edge*/
+    }
+    else
+    {
+      /*falling edge*/
+      previousMillis[0] = currentMillis;
+      timeFromLastChange = previousMillis[0] - previousMillis[1];   /*time diff between last rising edge and this falling edge*/ 
+    }
+
+    /*count state changes but saturate at 4 as more would not make any difference*/
+    if(newStateChanges < MAX_PULSE_MEASUREMENTS)
+    {
+      newStateChanges++;
+    }
+
+    /*store time delta of previous pulse*/
+    pulseTimes[pulseIdx] = timeFromLastChange;
+
+  #if 1
+
+    /*detect positive ack: two active pulses of 135ms, 115ms in between*/
+    if((!fbVal) && (newStateChanges >= 4))
+    {
+      uint8_t secondHighPulseIdx = pulseIdx;
+      uint8_t middleLowPulseIdx = PREV_IDX(secondHighPulseIdx);
+      uint8_t firstHighPulseIdx = PREV_IDX(middleLowPulseIdx);
+      /*at the low level now, measure last positive pulse*/
+      
+      if(CHECK_PULSE_LENGTH(pulseTimes[firstHighPulseIdx], 100, 200))
       {
-        if(CHECK_PULSE_LENGTH(pulseTimes[secondHighPulseIdx], 100, 200))
+        if(CHECK_PULSE_LENGTH(pulseTimes[middleLowPulseIdx], 100, 200))
         {
-          FbEvent_t fb = FB_POSITIVE_ACK;
-          xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+          if(CHECK_PULSE_LENGTH(pulseTimes[secondHighPulseIdx], 100, 200))
+          {
+            FbEvent_t fb = FB_POSITIVE_ACK;
+            xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+          }
         }
       }
     }
-  }
-  /*detect negative ack: two active pulses of 135ms, 115ms in between*/
-  if((!fbVal) && (newStateChanges >= 2))
-  {
-    uint8_t highPulseIdx = pulseIdx;
-    /*at the low level now, measure last positive pulse*/
-    
-    if(CHECK_PULSE_LENGTH(pulseTimes[highPulseIdx], 700, 900))
+    /*detect negative ack: two active pulses of 135ms, 115ms in between*/
+    if((!fbVal) && (newStateChanges >= 2))
     {
-      FbEvent_t fb = FB_NEGATIVE_ACK;
-      xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+      uint8_t highPulseIdx = pulseIdx;
+      /*at the low level now, measure last positive pulse*/
+      
+      if(CHECK_PULSE_LENGTH(pulseTimes[highPulseIdx], 700, 900))
+      {
+        FbEvent_t fb = FB_NEGATIVE_ACK;
+        xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+      }
     }
-  }
-  /*scream of death detection: we will see it once the user has cleared it: one long pulse, > 2000ms*/
-  if((!fbVal) && (newStateChanges >= 2))
-  {
-    uint8_t highPulseIdx = pulseIdx;
-    /*at the low level now, measure last positive pulse*/
-    
-    if(CHECK_PULSE_LENGTH(pulseTimes[highPulseIdx], 2000, (unsigned long)24*60*60*1000))  /*don't detect screaming of more than 24 hours. Should we?*/
+    /*scream of death detection: we will see it once the user has cleared it: one long pulse, > 2000ms*/
+    if((!fbVal) && (newStateChanges >= 2))
     {
-      FbEvent_t fb = FB_SCREAM_OF_DEATH;
-      xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+      uint8_t highPulseIdx = pulseIdx;
+      /*at the low level now, measure last positive pulse*/
+      
+      if(CHECK_PULSE_LENGTH(pulseTimes[highPulseIdx], 2000, (unsigned long)24*60*60*1000))  /*don't detect screaming of more than 24 hours. Should we?*/
+      {
+        FbEvent_t fb = FB_SCREAM_OF_DEATH;
+        xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+      }
     }
+
+  #endif
+
+    /*advance to next pulse index*/
+    pulseIdx = NEXT_IDX(pulseIdx);
+
+    if(xHigherPriorityTaskWoken)
+    {
+      /* Actual macro used here is port specific. */
+    //  taskYIELD_FROM_ISR();
+    }    
+   // digitalWrite(LED_BUILTIN, LOW); //HIGH
   }
-
-  /*advance to next pulse index*/
-  pulseIdx = NEXT_IDX(pulseIdx);
-
-  if(xHigherPriorityTaskWoken)
-  {
-    /* Actual macro used here is port specific. */
-  //  taskYIELD_FROM_ISR();
-  }    
-
-  sei();
 }
+
+
+
 
 static void ctrlTask(void *pvParameters)
 {
@@ -288,9 +328,11 @@ static void ctrlTask(void *pvParameters)
   Serial.println();
 #endif
 
-  IoInterfaceSetupPins(fbISR);
+  IoInterfaceSetupPins();
 
   xTimerStart(tickTimer, 0);
+  timer2Start();  
+
 
   while (1)
   {

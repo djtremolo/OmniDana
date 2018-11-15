@@ -1,6 +1,6 @@
 #include "ioInterface.h"
 
-static void setupFeedbackPin(feedbackKey_t fb, void (*fbFun)(void));
+static void setupFeedbackPin(feedbackKey_t fb);
 static void setupButtonPin(buttonKey_t key);
 static void setPinState(uint8_t ioPin, pinState_t state);
 
@@ -8,7 +8,7 @@ bool IoInterfaceReadFeedbackPin(feedbackKey_t fb);
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value);
 void IoInterfaceSetupPins(void (*fbFun)(void));
 
-void IoInterfaceSetupPins(void (*fbFun)(void))
+void IoInterfaceSetupPins()
 {
   uint8_t i;
 
@@ -19,21 +19,19 @@ void IoInterfaceSetupPins(void (*fbFun)(void))
 
   for (i = 0; i < FB_MAX; i++)
   {
-    setupFeedbackPin((feedbackKey_t)i, fbFun);
+    setupFeedbackPin((feedbackKey_t)i);
   }
 
 
 }
 
-static void setupFeedbackPin(feedbackKey_t fb, void (*fbFun)(void))
+static void setupFeedbackPin(feedbackKey_t fb)
 {
   if (fb >= FB_MAX)
     return;
 
   uint8_t ioPin = GPIOFeedbackMapping[fb];
-
   pinMode(ioPin, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(ioPin), fbFun, CHANGE);
 }
 
 bool IoInterfaceReadFeedbackPin(feedbackKey_t fb)
