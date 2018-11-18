@@ -47,10 +47,10 @@ static void ctrlTask(void *pvParameters);
 static void ctrlTaskTimerTick(TimerHandle_t xTimer);
 static bool keyPress(buttonKey_t key, buttonPress_t type);
 static void checkUserKeypad();
-static bool treatmentBolusStart(uint16_t p1, uint16_t p2, uint16_t p3);
-static bool treatmentBolusStop(uint16_t p1, uint16_t p2, uint16_t p3);
-static bool treatmentExtendedBolusStart(uint16_t p1, uint16_t p2, uint16_t p3);
-static bool treatmentExtendedBolusStop(uint16_t p1, uint16_t p2, uint16_t p3);
+static bool treatmentBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+static bool treatmentBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+static bool treatmentExtendedBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
 static void fbISR(void);
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx);
@@ -170,7 +170,7 @@ static void checkUserKeypad()
 
 
 
-#define TASK_TICK_RELOAD_VALUE    10
+#define TASK_TICK_RELOAD_VALUE    0 //10
 static void ctrlTaskTimerTick(TimerHandle_t xTimer)
 {
   static uint16_t tickCounter = TASK_TICK_RELOAD_VALUE;
@@ -343,7 +343,7 @@ static void ctrlTask(void *pvParameters)
     /*wait for a tick*/
     xSemaphoreTake(tickSemaphore, portMAX_DELAY);
 
-    Serial.println("TICK");
+  //  Serial.println("TICK");
 
     if(pdTRUE == xQueueReceive(keyQueue, &keyEvent, 0))
     {
@@ -407,16 +407,16 @@ static bool handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr)
   {
 
     case TREATMENT_BOLUS_START:
-      ret = treatmentBolusStart(tr->param1, tr->param2, tr->param3);
+      ret = treatmentBolusStart(ctx, tr->param1, tr->param2, tr->param3);
       break;
     case TREATMENT_BOLUS_STOP:
-      ret = treatmentBolusStop(tr->param1, tr->param2, tr->param3);
+      ret = treatmentBolusStop(ctx, tr->param1, tr->param2, tr->param3);
       break;
     case TREATMENT_EXTENDED_BOLUS_START:
-      ret = treatmentExtendedBolusStart(tr->param1, tr->param2, tr->param3);
+      ret = treatmentExtendedBolusStart(ctx, tr->param1, tr->param2, tr->param3);
       break;
     case TREATMENT_EXTENDED_BOLUS_STOP:
-      ret = treatmentExtendedBolusStop(tr->param1, tr->param2, tr->param3);
+      ret = treatmentExtendedBolusStop(ctx, tr->param1, tr->param2, tr->param3);
       break;
     case TREATMENT_TEMPORARY_BASAL_RATE_START:
       break;
@@ -431,6 +431,30 @@ static bool handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr)
 
   return ret;
 }
+
+static FbEvent_t waitForFeedback(uint16_t maxWaitMs)
+{
+  FbEvent_t fbEvent;
+  if(pdTRUE == xQueueReceive(fbQueue, &fbEvent, maxWaitMs / portTICK_PERIOD_MS))
+  {
+    /*consume acks but feed back the scream of death so the control task can handle it*/
+    xQueueSendToBack(fbQueue, &fbEvent, 0);
+    return fbEvent;
+  }
+
+  return FB_NONE;
+}
+
+
+/*
+  FB_NONE,
+  FB_POSITIVE_ACK,
+  FB_NEGATIVE_ACK,
+  FB_SCREAM_OF_DEATH
+} FbEvent_t;
+*/
+
+
 
 #define GO_TO_MENU_WITH_BUSY_CHECK() { if(treatmentGoToMenu() == false) return false; }
 
@@ -455,16 +479,29 @@ static bool treatmentGoToMenu()
   return true;
 }
 
-static bool treatmentBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
+static bool treatmentBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
 {
+  bool ret = false;
+
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
 
   /*
   param1: amount (units multiplied with 100)
   param2: not used
   */
+  uint16_t stepsForBolusAmount = p1 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
+
   (void)p2;
   (void)p3;
+
+  time_t t = now();
+
+  ctx->pump.initialBolusAmount = 0.0;
+  ctx->pump.lastBolusTimeHour = (uint8_t)hour(t);
+  ctx->pump.lastBolusTimeMinute = (uint8_t)minute(t);
+  ctx->pump.lastBolusAmount = (((float)p1)/100.0);
+
+
 
   #if DEBUG_PRINT
   Serial.println(F("treatmentBolusStart"));
@@ -480,7 +517,6 @@ static bool treatmentBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
 
   /*input bolus amount*/
-  uint16_t stepsForBolusAmount = p1 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
   for(uint16_t step = 0; step < stepsForBolusAmount; step++)
   {
     KEYPRESS_WITH_BUSY_CHECK(KEY_UP, PRESS_SHORT);
@@ -492,15 +528,48 @@ static bool treatmentBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
   /*confirm*/
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
 
-  /*we should get positive feedback*/  
-  //waitForFeedback();
 
-  return true;
+  #if DEBUG_PRINT
+  Serial.println(F("waiting for feedback"));
+  #endif
+
+  /*we should get positive feedback*/  
+  FbEvent_t fb = waitForFeedback(10000);
+
+  switch(fb)
+  {
+    case FB_POSITIVE_ACK:
+
+      #if DEBUG_PRINT
+      Serial.println(F("FB_POSITIVE_ACK"));
+      #endif
+
+      ret = true;
+      break;
+
+    case FB_NEGATIVE_ACK:
+      #if DEBUG_PRINT
+      Serial.println(F("FB_NEGATIVE_ACK"));
+      #endif
+      break;
+
+    default:
+      #if DEBUG_PRINT
+      Serial.println(F("failure"));
+      #endif
+      break;
+  }
+
+
+
+
+  return ret;
 }
 
-static bool treatmentBolusStop(uint16_t p1, uint16_t p2, uint16_t p3)
+static bool treatmentBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
 {
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
+  (void)ctx;
   (void)p1;
   (void)p2;
   (void)p3;
@@ -508,21 +577,38 @@ static bool treatmentBolusStop(uint16_t p1, uint16_t p2, uint16_t p3)
   return true;
 }
 
-static bool treatmentExtendedBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
+static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
 {
+  bool ret = false;
+  uint16_t stepsForBolusAmount = p1 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
+  uint16_t stepsForBolusNow = p2 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
+  uint16_t halfHours = p3;
+
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
 
   /*
   param1: total amount (units multiplied with 100)
   param2: amount now (units multiplied with 100)
-  param3: time in minutes
+  param3: time in half hours
   */
- 
-  (void)p3;
 
-  #if DEBUG_PRINT
+  //#if DEBUG_PRINT
   Serial.println(F("treatmentExtendedBolusStart"));
-  #endif
+  //#endif
+
+ctx->pump.extendedBolusStartTime = now();
+
+  ctx->pump.isExtendedInProgress = true;
+  ctx->pump.extendedBolusMinutes = halfHours * 30;
+  ctx->pump.extendedBolusAmount = ((float)p1) / 100.0;
+  float h = ((float)halfHours) / 2.0;
+
+  ctx->pump.extendedBolusAbsoluteRate =  ctx->pump.extendedBolusAmount / h;
+
+  ctx->pump.extendedBolusSoFarInMinutes = 0;
+  ctx->pump.extendedBolusDeliveredSoFar = 0;
+
+
 
   GO_TO_MENU_WITH_BUSY_CHECK();
 
@@ -533,8 +619,7 @@ static bool treatmentExtendedBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
 
-  /*input bolus amount*/
-  uint16_t stepsForBolusAmount = p1 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
+  /*input total amount*/
   for(uint16_t step = 0; step < stepsForBolusAmount; step++)
   {
     KEYPRESS_WITH_BUSY_CHECK(KEY_UP, PRESS_SHORT);
@@ -543,8 +628,7 @@ static bool treatmentExtendedBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
   /*extend*/
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
 
-  /*input bolus amount*/
-  uint16_t stepsForBolusNow = p2 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
+  /*input now part*/
   for(uint16_t step = 0; step < stepsForBolusNow; step++)
   {
     KEYPRESS_WITH_BUSY_CHECK(KEY_UP, PRESS_SHORT);
@@ -553,17 +637,56 @@ static bool treatmentExtendedBolusStart(uint16_t p1, uint16_t p2, uint16_t p3)
   /*accept*/
   KEYPRESS_WITH_BUSY_CHECK(KEY_F3, PRESS_SHORT);
 
+  /*make sure we start from 0.5h time*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+
+  /*input extension time*/
+  for(uint16_t step = 1; step < halfHours; step++)    /*start from 1 because the minimum is 0.5h already*/
+  {
+    KEYPRESS_WITH_BUSY_CHECK(KEY_UP, PRESS_SHORT);
+  }
+
   /*confirm*/
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
   
-  //waitForFeedback();
+  /*we should get positive feedback*/  
+  FbEvent_t fb = waitForFeedback(10000);
 
-  return true;
+  switch(fb)
+  {
+    case FB_POSITIVE_ACK:
+
+    //  #if DEBUG_PRINT
+      Serial.println(F("FB_POSITIVE_ACK"));
+   //   #endif
+
+      ret = true;
+      break;
+
+    case FB_NEGATIVE_ACK:
+    //  #if DEBUG_PRINT
+      Serial.println(F("FB_NEGATIVE_ACK"));
+     // #endif
+      break;
+
+    default:
+    //  #if DEBUG_PRINT
+      Serial.println(F("failure"));
+   //   #endif
+      break;
+  }
+
+
+  return ret;
 }
 
-static bool treatmentExtendedBolusStop(uint16_t p1, uint16_t p2, uint16_t p3)
+static bool treatmentExtendedBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
 {
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
+  (void)ctx;
   (void)p1;
   (void)p2;
   (void)p3;

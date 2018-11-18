@@ -72,6 +72,10 @@ typedef enum
   FB_SCREAM_OF_DEATH
 } FbEvent_t;
 
+#define PUMP_STATUS_SUSPENDED                    0x01
+#define PUMP_STATUS_TEMP_BASAL_IN_PROGRESS       0x10
+#define PUMP_STATUS_EXTENDED_BOLUS_IN_PROGRESS   0x04
+#define PUMP_STATUS_DUAL_BOLUS_IN_PROGRESS       0x08
 
 typedef struct
 {
@@ -80,19 +84,15 @@ typedef struct
   uint16_t pass;
   uint8_t error;
   uint8_t status;
-/*
-        pump.pumpSuspended = (status & 0x01) == 0x01;
-        pump.isTempBasalInProgress = (status & 0x10) == 0x10;
-        pump.isExtendedInProgress = (status & 0x04) == 0x04;
-        pump.isDualBolusInProgress = (status & 0x08) == 0x08;
-*/
 
-
-
-
+  time_t extendedBolusStartTime;
+  time_t extendedBolusStartLastReported;
+  time_t extendedBolusStopTime;
+  time_t extendedBolusStopLastReported;
   boolean isExtendedInProgress;
   uint16_t extendedBolusMinutes;
   float extendedBolusAbsoluteRate;
+  float extendedBolusAmount;
   uint16_t extendedBolusSoFarInMinutes;
   float extendedBolusDeliveredSoFar;
 
@@ -111,6 +111,11 @@ typedef struct
   float maxBolus;
   float bolusStep;
 
+/*  time_t tempBasalStartTime;
+  time_t tempBasalStartLastReported;
+  time_t tempBasalStopTime;
+  time_t tempBasalStopLastReported;
+*/
   uint8_t isTempBasalInProgress;
   uint8_t tempBasalPercent;
   uint8_t tempBasalDurationHour;    /*150==15min, 160==30min, otherwise hour*3600*/
@@ -134,7 +139,7 @@ typedef struct
   float maxBasal;
   float basalStep;  /*float as u8*/
 
-  uint16_t profileBasal[24];
+  //uint16_t profileBasal[24];
 
   uint16_t currentTarget;
   uint16_t currentCIR;
@@ -142,7 +147,7 @@ typedef struct
   uint8_t units;
 
   uint8_t language;
-
+/*
   uint16_t morningCIR;
   uint16_t afternoonCIR;
   uint16_t eveningCIR;
@@ -152,7 +157,7 @@ typedef struct
   float afternoonCF;
   float eveningCF;
   float nightCF;
-
+*/
 
 
 } DanaRSPump_t;

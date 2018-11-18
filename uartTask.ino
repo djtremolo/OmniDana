@@ -96,6 +96,24 @@ typedef enum
 #define OETC_SET_HISTORY_SAVE 0xE0
 #define OETC_KEEP_CONNECTION 0xFF
 
+#define DANARS_HISTORY_EVENT_RECORD_TEMPSTART                   1
+#define DANARS_HISTORY_EVENT_RECORD_TEMPSTOP                    2
+#define DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTART               3
+#define DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTOP                4
+#define DANARS_HISTORY_EVENT_RECORD_BOLUS                       5
+#define DANARS_HISTORY_EVENT_RECORD_DUALBOLUS                   6
+#define DANARS_HISTORY_EVENT_RECORD_DUALEXTENDEDSTART           7
+#define DANARS_HISTORY_EVENT_RECORD_DUALEXTENDEDSTOP            8
+#define DANARS_HISTORY_EVENT_RECORD_SUSPENDON                   9
+#define DANARS_HISTORY_EVENT_RECORD_SUSPENDOFF                  10
+#define DANARS_HISTORY_EVENT_RECORD_REFILL                      11
+#define DANARS_HISTORY_EVENT_RECORD_PRIME                       12
+#define DANARS_HISTORY_EVENT_RECORD_PROFILECHANGE               13
+#define DANARS_HISTORY_EVENT_RECORD_CARBS                       14
+#define DANARS_HISTORY_EVENT_RECORD_PRIMECANNULA                15
+
+
+
 typedef struct
 {
   DanaMessage_t danaMsg;
@@ -137,7 +155,7 @@ void uartTaskInitialize(OmniDanaContext_t *ctx)
   xTaskCreate(
       uartTask, 
       (const portCHAR *)"uartTask",
-      300,
+      200,
       (void *)ctx, 
       UART_TASK_PRIORITY, 
       NULL);
@@ -555,8 +573,6 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
 
     tmpu16 = msgGetU16(&buf);
 
-    ctx->pump.pass = 7493;
-
     tmpu8 = 1;  //result fail by default
     if (tmpu16 == ((ctx->pump.pass) ^ 0x3463))
     {
@@ -590,14 +606,9 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
     /*send if a response was created*/
     sendToAAPS(ctx, rawBuf, outLen);
 
-    /*simulate user latency*/
-    BlinkLed(5);
-
     msgPtr = tempBuf;
 
     /*and then send OK : pairing button pressed*/
-    ctx->pump.pass = 7493;
-
     msgPutU16(&msgPtr, (ctx->pump.pass) ^ 0x3463);
 
     outLen = createOutMessage(rawBuf, TYPE_ENCRYPTION_RESPONSE, OE_PASSKEY_RETURN, NULL, msgLen(tempBuf, msgPtr));
@@ -614,8 +625,6 @@ static int handleTypeEncryptionRequest(OmniDanaContext_t *ctx, uint8_t code, uin
 #if DEBUG_PRINT
     Serial.println(F("handleTypeEncryptionRequest: OE_TIME_INFORMATION"));
 #endif
-
-    ctx->pump.pass = 7493;
 
     msgPutU16(&msgPtr, (ctx->pump.pass) ^ 3463);
 
@@ -753,14 +762,6 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 #endif
     msgPutU8(&msgPtr, ctx->pump.status);
 
-    ctx->pump.dailyTotalUnits = 26.67;
-    ctx->pump.maxDailyTotalUnits = 90.67;
-
-    ctx->pump.currentBasal = 1.5;
-    ctx->pump.iob = 2.3;
-    ctx->pump.batteryRemaining = 89;
-    ctx->pump.reservoirRemainingUnits = 70.7;
-
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.dailyTotalUnits * 100.0));
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.maxDailyTotalUnits * 100.0));
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.reservoirRemainingUnits * 100.0));
@@ -873,21 +874,15 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 
     for (int i = 0; i < 10; i++)
     {
-      uint8_t s[] = "1234567890";
-      ctx->pump.serialNumber[i] = s[i];
       msgPutU8(&msgPtr, ctx->pump.serialNumber[i]);
     }
 
     for (int i = 0; i < 3; i++)
     {
-      uint8_t s[] = {2018 - 1900, 11 - 1, 1};
-      ctx->pump.shippingDate[i] = s[i];
       msgPutU8(&msgPtr, ctx->pump.shippingDate[i]);
     }
     for (int i = 0; i < 3; i++)
     {
-      uint8_t s[] = "FIN";
-      ctx->pump.shippingCountry[i] = s[i];
       msgPutU8(&msgPtr, ctx->pump.shippingCountry[i]);
     }
 
@@ -904,10 +899,6 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OR_GET_PUMP_CHECK"));
 #endif
-
-    ctx->pump.model = 1;
-    ctx->pump.protocol = 2;
-    ctx->pump.productCode = 3;
 
     msgPutU8(&msgPtr, ctx->pump.model);
     msgPutU8(&msgPtr, ctx->pump.protocol);
@@ -961,11 +952,6 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     Serial.println(F("handleTypeResponse: OBO_GET_STEP_BOLUS_INFORMATION"));
 #endif
 
-ctx->pump.bolusType = 0;
-//ctx->pump.lastBolusAmount = 5.0;
-ctx->pump.maxBolus = 24;
-ctx->pump.bolusStep = 0.05;
-
     msgPutU8(&msgPtr, ctx->pump.error);
 
     msgPutU8(&msgPtr, ctx->pump.bolusType);
@@ -993,6 +979,15 @@ ctx->pump.bolusStep = 0.05;
 
     msgPutU8(&msgPtr, ctx->pump.error);
     msgPutU8(&msgPtr, ctx->pump.isExtendedInProgress ? 0x01 : 0x00);
+
+
+  Serial.print(F("isExtendedInProgress="));
+if(ctx->pump.isExtendedInProgress)
+  Serial.println(F("true"));
+else
+  Serial.println(F("false"));
+
+
     msgPutU8(&msgPtr, ctx->pump.extendedBolusMinutes / 30);
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAbsoluteRate * 100.0));
     msgPutU16(&msgPtr, ctx->pump.extendedBolusSoFarInMinutes);
@@ -1007,13 +1002,13 @@ ctx->pump.bolusStep = 0.05;
     ret = 0;
     break;
 
-#if 0
     case OBO_GET_EXTENDED_BOLUS:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_GET_EXTENDED_BOLUS"));
 #endif
       break;
 
+#if 0
     case OBO_GET_DUAL_BOLUS:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_GET_DUAL_BOLUS"));
@@ -1053,25 +1048,124 @@ ctx->pump.bolusStep = 0.05;
       Serial.println(F("handleTypeResponse: OBO_GET_EXTENDED_MENU_OPTION_STATE"));
 #endif
       break;
+#endif
 
     case OBO_SET_EXTENDED_BOLUS:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_EXTENDED_BOLUS"));
 #endif
+
+
+
+
+
+      msgGetU8(&buf);
+
+      { //variable scope
+        uint16_t amountU16 = msgGetU16(&buf);
+        uint8_t timeInHalfHours = msgGetU8(&buf);
+
+#if DEBUG_PRINT
+        Serial.print(F("extended = "));
+        Serial.print(amountU16, DEC);
+        Serial.print(F("/100 u, time="));
+        Serial.print(timeInHalfHours*30, DEC);
+        Serial.println(F("minutes."));
+#endif
+
+        TreatmentMessage_t tr;
+        tr.treatment = TREATMENT_EXTENDED_BOLUS_START;
+        tr.param1 = amountU16;  /*total*/
+        tr.param2 = 0;  /*now*/
+        tr.param3 = (uint16_t)timeInHalfHours;
+        xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
+
+        msgPutU8(&msgPtr, 0);   //result == OK
+
+        outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_SET_EXTENDED_BOLUS, NULL, msgLen(tempBuf, msgPtr));
+
+        /*send if a response was created*/
+        sendToAAPS(ctx, rawBuf, outLen);
+
+
+#if 0
+
+        /*1u: 20 clicks, takes 39sec -> 1 click takes 2 seconds. 1 click == 0.05u -> amountU16 = 5. Required clicks = amountU16 / 5*/
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+
+        uint16_t numberOfClicks = amountU16 / 5;
+        for(uint16_t x=0; x<numberOfClicks; x++)
+        {
+          notifyDeliveryRateDisplay(ctx, rawBuf, (x+1)*5, (x==(numberOfClicks-1)));
+          vTaskDelay(2000 / portTICK_PERIOD_MS);
+          ctx->pump.iob += ctx->pump.bolusStep;
+        }
+
+
+#endif
+
+      }
+
+      /*mark ok*/
+      ret = 0;
       break;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      break;
+
+#if 0
 
     case OBO_SET_DUAL_BOLUS:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_DUAL_BOLUS"));
 #endif
       break;
+#endif
 
     case OBO_SET_EXTENDED_BOLUS_CANCEL:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_EXTENDED_BOLUS_CANCEL"));
 #endif
+      if(1)//ctx->pump.isExtendedInProgress)
+      {
+        TreatmentMessage_t tr;
+        tr.treatment = TREATMENT_EXTENDED_BOLUS_STOP;
+        tr.param1 = 0;
+        tr.param2 = 0;
+        tr.param3 = 0;
+        xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
+
+        ctx->pump.extendedBolusStopTime = now();
+
+        msgPutU8(&msgPtr, 0);   //result == OK
+
+      }
+      else
+      {
+        msgPutU8(&msgPtr, 1);   //result == failed
+      }
+  
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_SET_EXTENDED_BOLUS_CANCEL, NULL, msgLen(tempBuf, msgPtr));
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+
+      ret = 0;
       break;
-#endif
+
     case OBO_SET_STEP_BOLUS_START:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_STEP_BOLUS_START"));
@@ -1085,38 +1179,18 @@ ctx->pump.bolusStep = 0.05;
 
         (void)speed;
 
-        float amount = (float)amountU16 / 100.0;
-
 #if DEBUG_PRINT
         Serial.print(F("amount = "));
         Serial.print(amountU16, DEC);
         Serial.println(F("/100 u."));
 #endif
-        time_t t = now();
 
         TreatmentMessage_t tr;
         tr.treatment = TREATMENT_BOLUS_START;
         tr.param1 = amountU16;
         tr.param2 = 0;
+        tr.param3 = 0;
         xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
-
-
-
-
-        ctx->pump.bolusType = 0;
-        ctx->pump.initialBolusAmount = 0.0;
-        ctx->pump.lastBolusTimeHour = (uint8_t)hour(t);
-        ctx->pump.lastBolusTimeMinute = (uint8_t)minute(t);
-        ctx->pump.lastBolusAmount = amount;
-        ctx->pump.maxBolus = 24;
-    //    ctx->pump.bolusStep = 0.05;
-
-
-
-
-
-
-
 
         msgPutU8(&msgPtr, 0);   //result == OK
 
@@ -1187,22 +1261,11 @@ ctx->pump.bolusStep = 0.05;
       Serial.println(F("handleTypeResponse: OBO_SET_BOLUS_RATE"));
 #endif
       break;
-#endif
+
   case OBO_GET_CIR_CF_ARRAY:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBO_GET_CIR_CF_ARRAY"));
 #endif
-
-    ctx->pump.language = 0;
-    ctx->pump.units = UNITS_MMOL;
-    ctx->pump.morningCIR = 20;
-    ctx->pump.afternoonCIR = 21;
-    ctx->pump.eveningCIR = 22;
-    ctx->pump.nightCIR = 23;
-    ctx->pump.morningCF = 6;
-    ctx->pump.afternoonCF = 7;
-    ctx->pump.eveningCF = 6;
-    ctx->pump.nightCF = 5;
 
     msgPutU8(&msgPtr, ctx->pump.language);
     msgPutU8(&msgPtr, ctx->pump.units);
@@ -1232,7 +1295,7 @@ ctx->pump.bolusStep = 0.05;
     ret = 0;
 
     break;
-#if 0
+
     case OBO_SET_CIR_CF_ARRAY:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_SET_CIR_CF_ARRAY"));
@@ -1362,7 +1425,8 @@ ctx->pump.bolusStep = 0.05;
       
       for(int i=0; i<24; i++)
       {
-        ctx->pump.profileBasal[i] = msgGetU16(&buf);
+        //ctx->pump.profileBasal[i] = 
+        (void)msgGetU16(&buf);
       }
 
       msgPutU8(&msgPtr, 0); //OK
@@ -1389,7 +1453,7 @@ ctx->pump.bolusStep = 0.05;
 
     for (int i = 0; i < 24; i++)
     {
-      msgPutU16(&msgPtr, ctx->pump.profileBasal[i]);
+      msgPutU16(&msgPtr, 0);    //ctx->pump.profileBasal[i]);
     }
 
     outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_GET_BASAL_RATE, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
@@ -1501,8 +1565,87 @@ ctx->pump.bolusStep = 0.05;
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OA_HISTORY_EVENTS"));
 #endif
+      if (msgGetU8(&buf) == 6)
+      {
+        time_t eventsSince = msgGetTimeDate(&buf);
 
-      msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
+    /*TODO: Separate this code into a sub func*/
+
+        bool ebStartToBeSent = (ctx->pump.extendedBolusStartTime > ctx->pump.extendedBolusStartLastReported);
+        bool ebStopToBeSent = (ctx->pump.extendedBolusStopTime > ctx->pump.extendedBolusStopLastReported);
+       // bool tbStartToBeSent = (ctx->pump.tempBasalStartTime > ctx->pump.tempBasalStartLastReported);
+       // bool tbStopToBeSent = (ctx->pump.tempBasalStopTime > ctx->pump.tempBasalStopLastReported);
+
+/*
+#define DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTART               3
+#define DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTOP                4
+
+*/
+Serial.print(F("OA_HISTORY_EVENTS("));
+Serial.print(ebStartToBeSent, DEC);
+Serial.print(F(","));
+Serial.print(ebStopToBeSent, DEC);
+#if 0
+Serial.print(F(","));
+Serial.print(tbStartToBeSent, DEC);
+Serial.print(F(","));
+Serial.print(tbStopToBeSent, DEC);
+#endif
+Serial.println(F(")"));
+
+
+        if((ctx->pump.extendedBolusStartTime >= eventsSince) && ebStartToBeSent)
+        {
+          /*mark this as sent*/
+          ctx->pump.extendedBolusStartLastReported = ctx->pump.extendedBolusStartTime;
+
+Serial.println(F("report extendedBolus start"));
+
+          msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTART);
+
+          msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
+          
+          msgPutU16InvertedOrder(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAmount * 100.0));
+          msgPutU16InvertedOrder(&msgPtr, ctx->pump.extendedBolusMinutes);
+        }
+        else if((ctx->pump.extendedBolusStopTime >= eventsSince) && ebStopToBeSent)
+        {
+          /*mark this as sent*/
+          ctx->pump.extendedBolusStopLastReported = ctx->pump.extendedBolusStopTime;
+
+Serial.println(F("report extendedBolus stop"));
+
+          msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTOP);
+
+          msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStopTime);
+          
+          msgPutU16InvertedOrder(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAmount * 100.0));   /*TODO: change to real delivered*/
+          msgPutU16InvertedOrder(&msgPtr, ctx->pump.extendedBolusMinutes);                    /*TODO: change to real time before stopped*/
+        }
+#if 0
+        else if((ctx->pump.tempBasalStartLastReported >= eventsSince) && tbStartToBeSent)
+        {
+          /*mark this as sent*/
+          ctx->pump.tempBasalStartLastReported = ctx->pump.tempBasalStartTime;
+
+          msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_TEMPSTART);
+
+          msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
+          
+          msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalPercent); /*TODO*/
+          msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalDurationHour);  /*TODO*//*150==15min, 160==30min, otherwise hour*3600 */
+
+        }
+#endif
+        else
+        {
+          msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
+        }
+      }
+      else
+      {
+        msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
+      }
 
       outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OA_HISTORY_EVENTS, NULL, msgLen(tempBuf, msgPtr));
 
@@ -1511,9 +1654,6 @@ ctx->pump.bolusStep = 0.05;
 
       /*mark ok*/
       ret = 0;
-
-
-
       break;
 
 #if 0
