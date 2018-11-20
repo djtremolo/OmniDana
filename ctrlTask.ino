@@ -494,14 +494,6 @@ static bool treatmentBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2
   (void)p2;
   (void)p3;
 
-  time_t t = now();
-
-  ctx->pump.initialBolusAmount = 0.0;
-  ctx->pump.lastBolusTimeHour = (uint8_t)hour(t);
-  ctx->pump.lastBolusTimeMinute = (uint8_t)minute(t);
-  ctx->pump.lastBolusAmount = (((float)p1)/100.0);
-
-
 
   #if DEBUG_PRINT
   Serial.println(F("treatmentBolusStart"));
@@ -595,19 +587,6 @@ static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uin
   //#if DEBUG_PRINT
   Serial.println(F("treatmentExtendedBolusStart"));
   //#endif
-
-ctx->pump.extendedBolusStartTime = now();
-
-  ctx->pump.isExtendedInProgress = true;
-  ctx->pump.extendedBolusMinutes = halfHours * 30;
-  ctx->pump.extendedBolusAmount = ((float)p1) / 100.0;
-  float h = ((float)halfHours) / 2.0;
-
-  ctx->pump.extendedBolusAbsoluteRate =  ctx->pump.extendedBolusAmount / h;
-
-  ctx->pump.extendedBolusSoFarInMinutes = 0;
-  ctx->pump.extendedBolusDeliveredSoFar = 0;
-
 
 
   GO_TO_MENU_WITH_BUSY_CHECK();

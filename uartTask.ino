@@ -1073,12 +1073,36 @@ else
         Serial.println(F("minutes."));
 #endif
 
+
+
+        ctx->pump.extendedBolusStartTime = now();
+
+        ctx->pump.isExtendedInProgress = true;
+        ctx->pump.extendedBolusMinutes = timeInHalfHours * 30;
+        ctx->pump.extendedBolusAmount = ((float)amountU16) / 100.0;
+        float h = ((float)timeInHalfHours) / 2.0;
+
+        ctx->pump.extendedBolusAbsoluteRate =  ctx->pump.extendedBolusAmount;  //ZAIM pitäis kai olla jaettu tunneilla?  / h;
+
+        ctx->pump.extendedBolusSoFarInMinutes = 0;
+        ctx->pump.extendedBolusDeliveredSoFar = 0;
+
+
+
+
         TreatmentMessage_t tr;
         tr.treatment = TREATMENT_EXTENDED_BOLUS_START;
         tr.param1 = amountU16;  /*total*/
         tr.param2 = 0;  /*now*/
         tr.param3 = (uint16_t)timeInHalfHours;
         xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
+
+
+
+
+
+
+
 
         msgPutU8(&msgPtr, 0);   //result == OK
 
@@ -1141,6 +1165,14 @@ else
 #endif
       if(1)//ctx->pump.isExtendedInProgress)
       {
+
+        ctx->pump.extendedBolusStopTime = now();
+
+        ctx->pump.isExtendedInProgress = false;
+
+
+
+
         TreatmentMessage_t tr;
         tr.treatment = TREATMENT_EXTENDED_BOLUS_STOP;
         tr.param1 = 0;
@@ -1148,7 +1180,9 @@ else
         tr.param3 = 0;
         xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
 
-        ctx->pump.extendedBolusStopTime = now();
+
+
+
 
         msgPutU8(&msgPtr, 0);   //result == OK
 
@@ -1191,6 +1225,20 @@ else
         tr.param2 = 0;
         tr.param3 = 0;
         xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
+
+
+
+
+        time_t t = now();
+
+        ctx->pump.initialBolusAmount = 0.0;
+        ctx->pump.lastBolusTimeHour = (uint8_t)hour(t);
+        ctx->pump.lastBolusTimeMinute = (uint8_t)minute(t);
+        ctx->pump.lastBolusAmount = (((float)amountU16)/100.0);
+
+
+
+
 
         msgPutU8(&msgPtr, 0);   //result == OK
 
@@ -1567,20 +1615,27 @@ else
 #endif
       if (msgGetU8(&buf) == 6)
       {
+        bool moreToCome = true;
         time_t eventsSince = msgGetTimeDate(&buf);
 
     /*TODO: Separate this code into a sub func*/
 
-        bool ebStartToBeSent = (ctx->pump.extendedBolusStartTime > ctx->pump.extendedBolusStartLastReported);
-        bool ebStopToBeSent = (ctx->pump.extendedBolusStopTime > ctx->pump.extendedBolusStopLastReported);
-       // bool tbStartToBeSent = (ctx->pump.tempBasalStartTime > ctx->pump.tempBasalStartLastReported);
-       // bool tbStopToBeSent = (ctx->pump.tempBasalStopTime > ctx->pump.tempBasalStopLastReported);
 
 /*
 #define DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTART               3
 #define DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTOP                4
 
 */
+
+
+        while(moreToCome)
+        {
+          uint8_t *msgPtr = tempBuf;
+          bool ebStartToBeSent = (ctx->pump.extendedBolusStartTime > ctx->pump.extendedBolusStartLastReported);
+          bool ebStopToBeSent = (ctx->pump.extendedBolusStopTime > ctx->pump.extendedBolusStopLastReported);
+        // bool tbStartToBeSent = (ctx->pump.tempBasalStartTime > ctx->pump.tempBasalStartLastReported);
+        // bool tbStopToBeSent = (ctx->pump.tempBasalStopTime > ctx->pump.tempBasalStopLastReported);
+
 Serial.print(F("OA_HISTORY_EVENTS("));
 Serial.print(ebStartToBeSent, DEC);
 Serial.print(F(","));
@@ -1593,65 +1648,72 @@ Serial.print(tbStopToBeSent, DEC);
 #endif
 Serial.println(F(")"));
 
+          if((ctx->pump.extendedBolusStartTime >= eventsSince) && ebStartToBeSent)
+          {
+            /*mark this as sent*/
+            ctx->pump.extendedBolusStartLastReported = ctx->pump.extendedBolusStartTime;
 
-        if((ctx->pump.extendedBolusStartTime >= eventsSince) && ebStartToBeSent)
-        {
-          /*mark this as sent*/
-          ctx->pump.extendedBolusStartLastReported = ctx->pump.extendedBolusStartTime;
+  Serial.println(F("report extendedBolus start"));
 
-Serial.println(F("report extendedBolus start"));
+            msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTART);
 
-          msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTART);
+            msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
+            
+            msgPutU16InvertedOrder(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAmount * 100.0));
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.extendedBolusMinutes);
 
-          msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
-          
-          msgPutU16InvertedOrder(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAmount * 100.0));
-          msgPutU16InvertedOrder(&msgPtr, ctx->pump.extendedBolusMinutes);
-        }
-        else if((ctx->pump.extendedBolusStopTime >= eventsSince) && ebStopToBeSent)
-        {
-          /*mark this as sent*/
-          ctx->pump.extendedBolusStopLastReported = ctx->pump.extendedBolusStopTime;
+          }
+          else if((ctx->pump.extendedBolusStopTime >= eventsSince) && ebStopToBeSent)
+          {
+            /*mark this as sent*/
+            ctx->pump.extendedBolusStopLastReported = ctx->pump.extendedBolusStopTime;
 
-Serial.println(F("report extendedBolus stop"));
+  Serial.println(F("report extendedBolus stop"));
 
-          msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTOP);
+            msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_EXTENDEDSTOP);
 
-          msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStopTime);
-          
-          msgPutU16InvertedOrder(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAmount * 100.0));   /*TODO: change to real delivered*/
-          msgPutU16InvertedOrder(&msgPtr, ctx->pump.extendedBolusMinutes);                    /*TODO: change to real time before stopped*/
-        }
-#if 0
-        else if((ctx->pump.tempBasalStartLastReported >= eventsSince) && tbStartToBeSent)
-        {
-          /*mark this as sent*/
-          ctx->pump.tempBasalStartLastReported = ctx->pump.tempBasalStartTime;
+            msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStopTime);
+            
+            msgPutU16InvertedOrder(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAmount * 100.0));   /*TODO: change to real delivered*/
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.extendedBolusMinutes);                    /*TODO: change to real time before stopped*/
 
-          msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_TEMPSTART);
+            ctx->pump.extendedBolusMinutes = 0;
+            ctx->pump.extendedBolusAmount = 0.0;
+            ctx->pump.extendedBolusAbsoluteRate =  0.0;
 
-          msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
-          
-          msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalPercent); /*TODO*/
-          msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalDurationHour);  /*TODO*//*150==15min, 160==30min, otherwise hour*3600 */
+            ctx->pump.extendedBolusSoFarInMinutes = 0;
+            ctx->pump.extendedBolusDeliveredSoFar = 0;
 
-        }
-#endif
-        else
-        {
-          msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
+
+
+          }
+  #if 0
+          else if((ctx->pump.tempBasalStartLastReported >= eventsSince) && tbStartToBeSent)
+          {
+            /*mark this as sent*/
+            ctx->pump.tempBasalStartLastReported = ctx->pump.tempBasalStartTime;
+
+            msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_TEMPSTART);
+
+            msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
+            
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalPercent); /*TODO*/
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalDurationHour);  /*TODO*//*150==15min, 160==30min, otherwise hour*3600 */
+
+          }
+  #endif
+          else
+          {
+            msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
+            moreToCome = false;
+          }
+
+          outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OA_HISTORY_EVENTS, NULL, msgLen(tempBuf, msgPtr));
+
+          /*send if a response was created*/
+          sendToAAPS(ctx, rawBuf, outLen);
         }
       }
-      else
-      {
-        msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
-      }
-
-      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OA_HISTORY_EVENTS, NULL, msgLen(tempBuf, msgPtr));
-
-      /*send if a response was created*/
-      sendToAAPS(ctx, rawBuf, outLen);
-
       /*mark ok*/
       ret = 0;
       break;
