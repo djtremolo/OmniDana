@@ -771,7 +771,7 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     msgPutU8(&msgPtr, ctx->pump.batteryRemaining);
 
     msgPutU16(&msgPtr, (uint16_t)(ctx->pump.extendedBolusAbsoluteRate * 100.0));
-    msgPutU16(&msgPtr, (uint16_t)(ctx->pump.iob * 100.0));
+    msgPutU16(&msgPtr, 0);//(uint16_t)(ctx->pump.iob * 100.0));
 
     outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OR_INITIAL_SCREEN_INFORMATION, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
@@ -866,7 +866,6 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
       Serial.println(F("handleTypeResponse: OR_ALL_HISTORY"));
 #endif
       break;
-#endif
   case OR_GET_SHIPPING_INFORMATION:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OR_GET_SHIPPING_INFORMATION"));
@@ -895,6 +894,8 @@ static int handleTypeResponse(OmniDanaContext_t *ctx, uint8_t code, uint8_t *buf
     ret = 0;
 
     break;
+#endif
+
   case OR_GET_PUMP_CHECK:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OR_GET_PUMP_CHECK"));
@@ -1002,13 +1003,13 @@ else
     ret = 0;
     break;
 
+#if 0
     case OBO_GET_EXTENDED_BOLUS:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_GET_EXTENDED_BOLUS"));
 #endif
       break;
 
-#if 0
     case OBO_GET_DUAL_BOLUS:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_GET_DUAL_BOLUS"));
@@ -1080,7 +1081,7 @@ else
         ctx->pump.isExtendedInProgress = true;
         ctx->pump.extendedBolusMinutes = timeInHalfHours * 30;
         ctx->pump.extendedBolusAmount = ((float)amountU16) / 100.0;
-        float h = ((float)timeInHalfHours) / 2.0;
+        //float h = ((float)timeInHalfHours) / 2.0;
 
         ctx->pump.extendedBolusAbsoluteRate =  ctx->pump.extendedBolusAmount;  //ZAIM pitäis kai olla jaettu tunneilla?  / h;
 
@@ -1258,7 +1259,7 @@ else
         {
           notifyDeliveryRateDisplay(ctx, rawBuf, (x+1)*5, (x==(numberOfClicks-1)));
           vTaskDelay(2000 / portTICK_PERIOD_MS);
-          ctx->pump.iob += ctx->pump.bolusStep;
+          //ctx->pump.iob += ctx->pump.bolusStep;
         }
 
 
@@ -1270,6 +1271,7 @@ else
       ret = 0;
       break;
 
+#if 0
   case OBO_GET_CALCULATION_INFORMATION:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBO_GET_CALCULATION_INFORMATION"));
@@ -1283,10 +1285,10 @@ else
     msgPutU8(&msgPtr, ctx->pump.error);
     msgPutU16(&msgPtr, 0); //currentBG
     msgPutU16(&msgPtr, 0); //carbohydrate
-    msgPutU16(&msgPtr, ctx->pump.currentTarget);
-    msgPutU16(&msgPtr, ctx->pump.currentCIR);
-    msgPutU16(&msgPtr, ctx->pump.currentCF);
-    msgPutU16(&msgPtr, (uint16_t)(ctx->pump.iob * 100.0));
+    msgPutU16(&msgPtr, 0);//ctx->pump.currentTarget);
+    msgPutU16(&msgPtr, 0);//ctx->pump.currentCIR);
+    msgPutU16(&msgPtr, 0);//ctx->pump.currentCF);
+    msgPutU16(&msgPtr, 0); //(uint16_t)(ctx->pump.iob * 100.0));
     msgPutU8(&msgPtr, ctx->pump.units);
 
     outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBO_GET_CALCULATION_INFORMATION, NULL, msgLen(tempBuf, msgPtr));
@@ -1297,7 +1299,7 @@ else
     /*mark ok*/
     ret = 0;
     break;
-#if 0
+
     case OBO_GET_BOLUS_RATE:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBO_GET_BOLUS_RATE"));
@@ -1381,13 +1383,44 @@ else
       Serial.println(F("handleTypeResponse: OBO_SET_BOLUS_OPTION"));
 #endif
       break;
+#endif
+
 
     case OBA_SET_TEMPORARY_BASAL:
-#if DEBUG_PRINT
-      Serial.println(F("handleTypeResponse: OBA_SET_TEMPORARY_BASAL"));
+      if (msgGetU8(&buf) == 3)
+      {
+//#if DEBUG_PRINT
+        Serial.println(F("handleTypeResponse: OBA_SET_TEMPORARY_BASAL"));
+//#endif
+        uint16_t newBasalRate = msgGetU16(&buf);
+        uint8_t basalDuration = msgGetU8(&buf);
+
+
+        (void)newBasalRate;
+        (void)basalDuration;
+
+        msgPutU8(&msgPtr, 0);   //OK
+
+        outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_SET_TEMPORARY_BASAL, NULL, msgLen(tempBuf, msgPtr)); 
+
+        /*send if a response was created*/
+        sendToAAPS(ctx, rawBuf, outLen);
+
+#if 0
+        TreatmentMessage_t tr;
+        tr.treatment = TREATMENT_TEMPORARY_BASAL_RATE_START;
+        tr.param1 = newBasalRate;
+        tr.param2 = basalDuration;
+        tr.param3 = 0;
+        xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
 #endif
+        /*mark ok*/
+        ret = 0;
+
+      }
       break;
-#endif
+
+
   case OBA_TEMPORARY_BASAL_STATE:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBA_TEMPORARY_BASAL_STATE"));
@@ -1601,12 +1634,40 @@ else
 #endif
       break;
 
+#endif
     case OBA_APS_SET_TEMPORARY_BASAL:
-#if DEBUG_PRINT
-      Serial.println(F("handleTypeResponse: OBA_APS_SET_TEMPORARY_BASAL"));
-#endif
+        if (msgGetU8(&buf) == 3)
+        {
+//#if DEBUG_PRINT
+        Serial.println(F("handleTypeResponse: OBA_APS_SET_TEMPORARY_BASAL"));
+//#endif
+        uint16_t newBasalRate = msgGetU16(&buf);
+        uint8_t basalDuration = msgGetU8(&buf);
+
+        (void)newBasalRate;
+        (void)basalDuration;
+
+
+        msgPutU8(&msgPtr, 0);   //OK
+
+        outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_APS_SET_TEMPORARY_BASAL, NULL, msgLen(tempBuf, msgPtr)); 
+
+        /*send if a response was created*/
+        sendToAAPS(ctx, rawBuf, outLen);
+
+        TreatmentMessage_t tr;
+        tr.treatment = TREATMENT_TEMPORARY_BASAL_RATE_START;
+        tr.param1 = newBasalRate;
+        tr.param2 = basalDuration;
+        tr.param3 = 0;
+        xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
+
+        /*mark ok*/
+        ret = 0;
+
+      }
       break;
-#endif
+
 
 
     case OA_HISTORY_EVENTS:

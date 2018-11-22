@@ -51,6 +51,10 @@ static bool treatmentBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2
 static bool treatmentBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentExtendedBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+static bool treatmentTemporaryBasalStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+
+
 static void fbISR(void);
 
 void ctrlTaskInitialize(OmniDanaContext_t *ctx);
@@ -419,8 +423,10 @@ static bool handleTreatment(OmniDanaContext_t *ctx, TreatmentMessage_t *tr)
       ret = treatmentExtendedBolusStop(ctx, tr->param1, tr->param2, tr->param3);
       break;
     case TREATMENT_TEMPORARY_BASAL_RATE_START:
+      ret = treatmentTemporaryBasalStart(ctx, tr->param1, tr->param2, tr->param3);
       break;
     case TREATMENT_TEMPORARY_BASAL_RATE_STOP:
+      ret = treatmentTemporaryBasalStop(ctx, tr->param1, tr->param2, tr->param3);
       break;
 
     default:
@@ -482,6 +488,7 @@ static bool treatmentGoToMenu()
 static bool treatmentBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
 {
   bool ret = false;
+  (void)ctx;
 
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
 
@@ -575,6 +582,8 @@ static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uin
   uint16_t stepsForBolusAmount = p1 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
   uint16_t stepsForBolusNow = p2 / 10;   /*each step is 0.10u. Requested=12.3u -> p1==1230 -> steps = 123*/
   uint16_t halfHours = p3;
+
+  (void)ctx;
 
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
 
@@ -703,6 +712,86 @@ static bool keyPress(buttonKey_t key, buttonPress_t type)
 
   return true;
 }
+
+
+static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
+{
+  bool ret = false;
+  (void)ctx;
+
+  /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
+
+  /*
+  param1: new basal rate (times 100)
+  param2: duration: 150=15min, 160=30min, otherwise: duration in seconds
+  */
+  uint16_t basalRate = p1;
+
+  (void)p2;
+  (void)p3;
+
+
+  //#if DEBUG_PRINT
+  Serial.print(F("treatmentTemporaryBasalStart("));
+  Serial.print(p1, DEC);
+  Serial.print(F(","));
+  Serial.print(p2, DEC);
+  Serial.println(F(")."));
+
+  //#endif
+
+  GO_TO_MENU_WITH_BUSY_CHECK();
+
+  
+  //#if DEBUG_PRINT
+  Serial.println(F("waiting for feedback"));
+  //#endif
+
+  /*we should get positive feedback*/  
+  FbEvent_t fb = waitForFeedback(10000);
+
+  switch(fb)
+  {
+    case FB_POSITIVE_ACK:
+
+      #if DEBUG_PRINT
+      Serial.println(F("FB_POSITIVE_ACK"));
+      #endif
+
+      ret = true;
+      break;
+
+    case FB_NEGATIVE_ACK:
+      #if DEBUG_PRINT
+      Serial.println(F("FB_NEGATIVE_ACK"));
+      #endif
+      break;
+
+    default:
+      #if DEBUG_PRINT
+      Serial.println(F("failure"));
+      #endif
+      break;
+  }
+
+
+
+
+  return ret;
+}
+
+
+static bool treatmentTemporaryBasalStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
+{
+  /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
+  (void)ctx;
+  (void)p1;
+  (void)p2;
+  (void)p3;
+
+  return true;
+}
+
 
 #if 0
 static bool checkFeedback()

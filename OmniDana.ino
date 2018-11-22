@@ -48,7 +48,7 @@ static void initializePumpData(DanaRSPump_t *pump)
   pump->reservoirRemainingUnits = 70;
   pump->currentBasal = 2.9;
   pump->batteryRemaining = 89;
-  pump->iob = 2.5;
+  //pump->iob = 2.5;
   pump->bolusType = 0;
   pump->initialBolusAmount = 0;
   pump->lastBolusTimeHour = 0;
@@ -69,9 +69,9 @@ static void initializePumpData(DanaRSPump_t *pump)
   pump->missedBolusConfig = 0;
   pump->maxBasal = 4.0;
   pump->basalStep = 0.1;  /*float as u8*/
-  pump->currentTarget = 5;
-  pump->currentCIR = 20;
-  pump->currentCF = 6;
+  //pump->currentTarget = 5;
+  //pump->currentCIR = 20;
+  //pump->currentCF = 6;
   pump->units = UNITS_MMOL;
   pump->language = 0;
   
@@ -85,7 +85,7 @@ static void initializePumpData(DanaRSPump_t *pump)
   pump->eveningCF = 6;
   pump->nightCF = 6;
   */
-
+/*
   for (int i = 0; i < 10; i++)
   {
     uint8_t s[] = "1234567890";
@@ -102,7 +102,7 @@ static void initializePumpData(DanaRSPump_t *pump)
     uint8_t s[] = "FIN";
     pump->shippingCountry[i] = s[i];
   }
-
+*/
 
 }
 

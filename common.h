@@ -101,7 +101,7 @@ typedef struct
   float reservoirRemainingUnits;
   float currentBasal;
   uint8_t batteryRemaining;
-  float iob;
+  //float iob;
 
   uint8_t bolusType;
   float initialBolusAmount;
@@ -121,9 +121,9 @@ typedef struct
   uint8_t tempBasalDurationHour;    /*150==15min, 160==30min, otherwise hour*3600*/
   uint16_t tempBasalRunningMin;
 
-  uint8_t serialNumber[10];
-  uint8_t shippingDate[3];    /* byte0=year minus 1900, byte1=month between 0-11, byte2= day of the month between 1-31.*/
-  uint8_t shippingCountry[3];
+//  uint8_t serialNumber[10];
+//  uint8_t shippingDate[3];    /* byte0=year minus 1900, byte1=month between 0-11, byte2= day of the month between 1-31.*/
+//  uint8_t shippingCountry[3];
 
   uint8_t model;
   uint8_t protocol;
@@ -141,9 +141,9 @@ typedef struct
 
   //uint16_t profileBasal[24];
 
-  uint16_t currentTarget;
-  uint16_t currentCIR;
-  uint16_t currentCF;
+ // uint16_t currentTarget;
+ // uint16_t currentCIR;
+ // uint16_t currentCF;
   uint8_t units;
 
   uint8_t language;
