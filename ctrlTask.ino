@@ -97,7 +97,7 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
   if(xTaskCreate(
       ctrlTask, 
       (const portCHAR *)"ctrlTask",
-      250,
+      240,
       (void *)ctx, 
       CTRL_TASK_PRIORITY,
       NULL) != pdPASS)
@@ -721,12 +721,8 @@ static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, ui
 
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
 
-  /*
-  param1: new basal rate (times 100)
-  param2: duration: 150=15min, 160=30min, otherwise: duration in seconds
-  */
   uint16_t basalRate = p1;
-
+  (void)basalRate;
   (void)p2;
   (void)p3;
 

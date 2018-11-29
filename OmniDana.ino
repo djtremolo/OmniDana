@@ -58,7 +58,7 @@ static void initializePumpData(DanaRSPump_t *pump)
   pump->bolusStep = 0.05;
   pump->isTempBasalInProgress = 0;
   pump->tempBasalPercent = 0;
-  pump->tempBasalDurationHour = 0;    /*150==15min, 160==30min, otherwise hour*3600 */
+  pump->tempBasalDurationMinutes = 0;
   pump->tempBasalRunningMin = 0;
   pump->model = 1;
   pump->protocol = 2;
@@ -75,6 +75,16 @@ static void initializePumpData(DanaRSPump_t *pump)
   pump->units = UNITS_MMOL;
   pump->language = 0;
   
+  pump->extendedBolusStartTime = 0;
+  pump->extendedBolusStopTime = 0;
+  pump->tempBasalStartTime = 0;
+  pump->tempBasalStopTime = 0;
+
+  pump->extendedBolusStartLastReported = 0;
+  pump->extendedBolusStopLastReported = 0;
+  pump->tempBasalStartLastReported = 0;
+  pump->tempBasalStopLastReported = 0;
+
   /*
   pump->morningCIR = 20;
   pump->afternoonCIR = 20;

@@ -111,14 +111,13 @@ typedef struct
   float maxBolus;
   float bolusStep;
 
-/*  time_t tempBasalStartTime;
+  time_t tempBasalStartTime;
   time_t tempBasalStartLastReported;
   time_t tempBasalStopTime;
   time_t tempBasalStopLastReported;
-*/
   uint8_t isTempBasalInProgress;
-  uint8_t tempBasalPercent;
-  uint8_t tempBasalDurationHour;    /*150==15min, 160==30min, otherwise hour*3600*/
+  uint16_t tempBasalPercent;
+  uint8_t tempBasalDurationMinutes;
   uint16_t tempBasalRunningMin;
 
 //  uint8_t serialNumber[10];

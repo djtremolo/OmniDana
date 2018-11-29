@@ -155,7 +155,7 @@ void uartTaskInitialize(OmniDanaContext_t *ctx)
   xTaskCreate(
       uartTask, 
       (const portCHAR *)"uartTask",
-      200,
+      220,
       (void *)ctx, 
       UART_TASK_PRIORITY, 
       NULL);
@@ -1387,17 +1387,33 @@ else
 
 
     case OBA_SET_TEMPORARY_BASAL:
-      if (msgGetU8(&buf) == 3)
+      if (msgGetU8(&buf) == 5)
       {
 //#if DEBUG_PRINT
         Serial.println(F("handleTypeResponse: OBA_SET_TEMPORARY_BASAL"));
 //#endif
         uint16_t newBasalRate = msgGetU16(&buf);
-        uint8_t basalDuration = msgGetU8(&buf);
+        uint16_t newBasalRateInPercent = msgGetU16(&buf);
+        uint8_t basalDurationMinutes = msgGetU8(&buf);
 
+        ctx->pump.tempBasalStartTime = now();
 
-        (void)newBasalRate;
-        (void)basalDuration;
+        ctx->pump.isTempBasalInProgress = 1;
+        ctx->pump.tempBasalPercent = newBasalRateInPercent;
+        
+        ctx->pump.tempBasalDurationMinutes = basalDurationMinutes;
+        ctx->pump.tempBasalRunningMin = 0;
+
+#if 1
+Serial.print(F("Set TempBasal:"));
+Serial.print(newBasalRate, DEC);
+Serial.print(F("u/hr,"));
+Serial.print(ctx->pump.tempBasalPercent, DEC);
+Serial.print(F("%,"));
+Serial.print(ctx->pump.tempBasalDurationMinutes, DEC);
+Serial.println(F("min"));
+#endif
+
 
         msgPutU8(&msgPtr, 0);   //OK
 
@@ -1422,16 +1438,18 @@ else
 
 
   case OBA_TEMPORARY_BASAL_STATE:
-#if DEBUG_PRINT
+#if 1//DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBA_TEMPORARY_BASAL_STATE"));
 #endif
-
     msgPutU8(&msgPtr, ctx->pump.error);
 
     msgPutU8(&msgPtr, ctx->pump.isTempBasalInProgress);
-    msgPutU8(&msgPtr, ctx->pump.tempBasalPercent);
-    msgPutU8(&msgPtr, ctx->pump.tempBasalDurationHour); /*TODO: 150==15min, 160==30min, otherwise hour*3600*/
+    msgPutU16(&msgPtr, ctx->pump.tempBasalPercent);
+    msgPutU8(&msgPtr, ctx->pump.tempBasalDurationMinutes);
     msgPutU16(&msgPtr, ctx->pump.tempBasalRunningMin);
+
+
+
 
     outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_TEMPORARY_BASAL_STATE, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
@@ -1441,13 +1459,26 @@ else
     /*mark ok*/
     ret = 0;
     break;
-#if 0 
-    case OBA_CANCEL_TEMPORARY_BASAL:
+  case OBA_CANCEL_TEMPORARY_BASAL:
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBA_CANCEL_TEMPORARY_BASAL"));
 #endif
+      ctx->pump.isTempBasalInProgress = 0;
+      ctx->pump.tempBasalStopTime = now();
+
+      msgPutU8(&msgPtr, 0); //OK
+
+      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_CANCEL_TEMPORARY_BASAL, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+
+      /*send if a response was created*/
+      sendToAAPS(ctx, rawBuf, outLen);
+
+      /*mark ok*/
+      ret = 0;
+
+
       break;
-#endif
+
   case OBA_GET_PROFILE_NUMBER:
 #if DEBUG_PRINT
     Serial.println(F("handleTypeResponse: OBA_GET_PROFILE_NUMBER"));
@@ -1636,16 +1667,35 @@ else
 
 #endif
     case OBA_APS_SET_TEMPORARY_BASAL:
-        if (msgGetU8(&buf) == 3)
+        if (msgGetU8(&buf) == 5)
         {
 //#if DEBUG_PRINT
         Serial.println(F("handleTypeResponse: OBA_APS_SET_TEMPORARY_BASAL"));
 //#endif
         uint16_t newBasalRate = msgGetU16(&buf);
-        uint8_t basalDuration = msgGetU8(&buf);
+        uint16_t newBasalRateInPercent = msgGetU16(&buf);
+        uint8_t basalDurationMinutes = msgGetU8(&buf);
 
-        (void)newBasalRate;
-        (void)basalDuration;
+        ctx->pump.tempBasalStartTime = now();
+
+        ctx->pump.isTempBasalInProgress = 1;
+        ctx->pump.tempBasalPercent = newBasalRateInPercent;
+        
+        ctx->pump.tempBasalDurationMinutes = basalDurationMinutes;
+        ctx->pump.tempBasalRunningMin = 0;
+
+
+#if 1
+Serial.print(F("APS Set TempBasal:"));
+Serial.print(newBasalRate, DEC);
+Serial.print(F("u/hr,"));
+Serial.print(ctx->pump.tempBasalPercent, DEC);
+Serial.print(F("%,"));
+Serial.print(ctx->pump.tempBasalDurationMinutes, DEC);
+Serial.println(F("min"));
+#endif
+
+
 
 
         msgPutU8(&msgPtr, 0);   //OK
@@ -1658,7 +1708,7 @@ else
         TreatmentMessage_t tr;
         tr.treatment = TREATMENT_TEMPORARY_BASAL_RATE_START;
         tr.param1 = newBasalRate;
-        tr.param2 = basalDuration;
+        tr.param2 = basalDurationMinutes;
         tr.param3 = 0;
         xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
 
@@ -1694,19 +1744,17 @@ else
           uint8_t *msgPtr = tempBuf;
           bool ebStartToBeSent = (ctx->pump.extendedBolusStartTime > ctx->pump.extendedBolusStartLastReported);
           bool ebStopToBeSent = (ctx->pump.extendedBolusStopTime > ctx->pump.extendedBolusStopLastReported);
-        // bool tbStartToBeSent = (ctx->pump.tempBasalStartTime > ctx->pump.tempBasalStartLastReported);
-        // bool tbStopToBeSent = (ctx->pump.tempBasalStopTime > ctx->pump.tempBasalStopLastReported);
+          bool tbStartToBeSent = (ctx->pump.tempBasalStartTime > ctx->pump.tempBasalStartLastReported);
+          bool tbStopToBeSent = (ctx->pump.tempBasalStopTime > ctx->pump.tempBasalStopLastReported);
 
 Serial.print(F("OA_HISTORY_EVENTS("));
 Serial.print(ebStartToBeSent, DEC);
 Serial.print(F(","));
 Serial.print(ebStopToBeSent, DEC);
-#if 0
-Serial.print(F(","));
+Serial.print(F(":"));
 Serial.print(tbStartToBeSent, DEC);
 Serial.print(F(","));
 Serial.print(tbStopToBeSent, DEC);
-#endif
 Serial.println(F(")"));
 
           if((ctx->pump.extendedBolusStartTime >= eventsSince) && ebStartToBeSent)
@@ -1744,25 +1792,36 @@ Serial.println(F(")"));
 
             ctx->pump.extendedBolusSoFarInMinutes = 0;
             ctx->pump.extendedBolusDeliveredSoFar = 0;
-
-
-
           }
-  #if 0
-          else if((ctx->pump.tempBasalStartLastReported >= eventsSince) && tbStartToBeSent)
+          else if((ctx->pump.tempBasalStartTime >= eventsSince) && tbStartToBeSent)
           {
             /*mark this as sent*/
             ctx->pump.tempBasalStartLastReported = ctx->pump.tempBasalStartTime;
 
+  Serial.println(F("report tempbasal start"));
+
             msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_TEMPSTART);
 
-            msgPutTimeDate(&msgPtr, ctx->pump.extendedBolusStartTime);
+            msgPutTimeDate(&msgPtr, ctx->pump.tempBasalStartTime);
             
             msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalPercent); /*TODO*/
-            msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalDurationHour);  /*TODO*//*150==15min, 160==30min, otherwise hour*3600 */
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalDurationMinutes);
 
           }
-  #endif
+          else if((ctx->pump.tempBasalStopTime >= eventsSince) && tbStopToBeSent)
+          {
+            /*mark this as sent*/
+            ctx->pump.tempBasalStopLastReported = ctx->pump.tempBasalStopTime;
+
+  Serial.println(F("report tempbasal stop"));
+
+            msgPutU8(&msgPtr, DANARS_HISTORY_EVENT_RECORD_TEMPSTOP);
+
+            msgPutTimeDate(&msgPtr, ctx->pump.tempBasalStopTime);
+
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalPercent); /*TODO*/
+            msgPutU16InvertedOrder(&msgPtr, ctx->pump.tempBasalDurationMinutes);
+          }
           else
           {
             msgPutU8(&msgPtr, 0xFF); /*last record, will be skipped*/
