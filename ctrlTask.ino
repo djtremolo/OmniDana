@@ -30,8 +30,8 @@ typedef enum
 #define FB_DEBOUNCING_TIME_MS         10
 
 
+static volatile bool beeperActivityDetected = false;
 static bool userActive = false;
-
 static bool controlIsActive = false;
 static buttonKey_t controlDriveButton = KEY_NONE;
 static uint8_t buttonState[KEY_MAX];
@@ -97,7 +97,7 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
   if(xTaskCreate(
       ctrlTask, 
       (const portCHAR *)"ctrlTask",
-      240,
+      250,
       (void *)ctx, 
       CTRL_TASK_PRIORITY,
       NULL) != pdPASS)
@@ -317,7 +317,10 @@ static void fbISR(void)
   }
 }
 
-
+void beeperFollowerISR(void)
+{
+  /*a change is detected*/
+}
 
 
 static void ctrlTask(void *pvParameters)
@@ -332,7 +335,7 @@ static void ctrlTask(void *pvParameters)
   Serial.println();
 #endif
 
-  IoInterfaceSetupPins();
+  IoInterfaceSetupPins(beeperFollowerISR);
 
   xTimerStart(tickTimer, 0);
   timer2Start();  
@@ -626,10 +629,10 @@ static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uin
   KEYPRESS_WITH_BUSY_CHECK(KEY_F3, PRESS_SHORT);
 
   /*make sure we start from 0.5h time*/
-  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
-  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
-  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
-  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  for(uint16_t step = 0; step < 10; step++)    /*usually, we need only one step down but in some cases there might be more needed*/
+  {
+    KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  }
 
   /*input extension time*/
   for(uint16_t step = 1; step < halfHours; step++)    /*start from 1 because the minimum is 0.5h already*/

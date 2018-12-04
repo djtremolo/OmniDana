@@ -497,6 +497,9 @@ static int handlePayload(OmniDanaContext_t *ctx, DanaMessage_t *dMsg)
       break;
     case TYPE_RESPONSE:
       ret = handleTypeResponse(ctx, dMsg->buf[1], payLoadBuf, payLoadLen); /*commands sent as responses by AAPS.. a bit strange*/
+
+      Serial.println(F("TYPE_RESPONSE done"));
+
       break;
 
     default:
@@ -1396,6 +1399,8 @@ else
         uint16_t newBasalRateInPercent = msgGetU16(&buf);
         uint8_t basalDurationMinutes = msgGetU8(&buf);
 
+        //uint16_t newBasalRate = (currentBasalRate*newBasalRateInPercent)/100;
+
         ctx->pump.tempBasalStartTime = now();
 
         ctx->pump.isTempBasalInProgress = 1;
@@ -1694,9 +1699,6 @@ Serial.print(F("%,"));
 Serial.print(ctx->pump.tempBasalDurationMinutes, DEC);
 Serial.println(F("min"));
 #endif
-
-
-
 
         msgPutU8(&msgPtr, 0);   //OK
 

@@ -8,7 +8,7 @@ bool IoInterfaceReadFeedbackPin(feedbackKey_t fb);
 void IoInterfaceSetButtonPin(buttonKey_t key, bool value);
 void IoInterfaceSetupPins(void (*fbFun)(void));
 
-void IoInterfaceSetupPins()
+void IoInterfaceSetupPins(void (*fbFun)(void))
 {
   uint8_t i;
 
@@ -19,19 +19,20 @@ void IoInterfaceSetupPins()
 
   for (i = 0; i < FB_MAX; i++)
   {
-    setupFeedbackPin((feedbackKey_t)i);
+    setupFeedbackPin((feedbackKey_t)i, fbFun);
   }
 
 
 }
 
-static void setupFeedbackPin(feedbackKey_t fb)
+static void setupFeedbackPin(feedbackKey_t fb, void (*fbFun)(void))
 {
   if (fb >= FB_MAX)
     return;
 
   uint8_t ioPin = GPIOFeedbackMapping[fb];
   pinMode(ioPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ioPin), fbFun, CHANGE);  
 }
 
 bool IoInterfaceReadFeedbackPin(feedbackKey_t fb)
