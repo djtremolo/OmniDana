@@ -191,7 +191,7 @@ static void ctrlTaskTimerTick(TimerHandle_t xTimer)
     xSemaphoreGive(tickSemaphore);
   }
 }
-
+#if 0
 static void fbISR(void)
 {
   static bool debouncingLastState = true;
@@ -317,9 +317,110 @@ static void fbISR(void)
   }
 }
 
+#else
+
+#define FB_MAX_PULSE_LENGTH         10000
+static void fbISR(void)
+{
+  static uint16_t onPulseInMs = 0;
+  static uint16_t offPulseInMs = 0;
+  static bool positiveAckFirstPulseFound = false;
+  static bool positiveAckSecondPulseFound = false;
+  static bool prevActValue = true;
+  bool currentActValue = beeperActivityDetected;
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+  /*the beeper gives audible pulses, but is driven by a 4kHz square wave. The interrupt fires 
+  at each square wave pulse and triggers the beeperActivityDetected flag.
+  That flag is checked here at each 1ms tick and the feedback signals are generated from here.*/
+
+  /*first, let's clear the flag risen by the ISR*/
+  beeperActivityDetected = false; /*clear flag*/
+
+  /*check for activity. If something has happened, we are in "beep" state*/
+  if(currentActValue)
+  {
+    /*cumulate time during "on" state*/
+    if(onPulseInMs < FB_MAX_PULSE_LENGTH)
+      onPulseInMs++;
+  }
+  else
+  {
+    /*cumulate time during "off" state*/
+    if(offPulseInMs < FB_MAX_PULSE_LENGTH)
+      offPulseInMs++;
+  }
+
+  /*check if the state has changed, i.e. if this is an edge*/
+  if(prevActValue != currentActValue)
+  {
+    /*this is an edge, so let's see if it was rising or falling one*/
+    if(currentActValue)
+    {
+      /*logical transition: off->on*/
+
+      /*check if start of a positive ack: 135+115+135 double pulse*/
+      if(positiveAckFirstPulseFound && CHECK_PULSE_LENGTH(offPulseInMs, 80, 160))
+      {
+        positiveAckSecondPulseFound = true;
+      }
+
+      /*clear counter*/
+      offPulseInMs = 0;
+    }
+    else
+    {
+      /*logical transition: on->off*/
+
+      /*check if this is the final pulse of a positive ack*/
+      if(positiveAckSecondPulseFound && CHECK_PULSE_LENGTH(onPulseInMs, 100, 180))
+      {
+        FbEvent_t fb = FB_POSITIVE_ACK;
+        xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+      }
+      /*check if first pulse of a positive ack: ~135*/
+      else if(CHECK_PULSE_LENGTH(onPulseInMs, 100, 180))
+      {
+        positiveAckFirstPulseFound = true;
+      }
+      /*check if negative ack: ~800ms single pulse*/
+      else if(CHECK_PULSE_LENGTH(onPulseInMs, 700, 900))
+      {
+        FbEvent_t fb = FB_NEGATIVE_ACK;
+        xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+      }
+      else
+      {
+        /*positive ack pulse failed*/
+        positiveAckFirstPulseFound = false;
+        positiveAckSecondPulseFound = false;
+      }
+
+      /*clear counter*/
+      onPulseInMs = 0;
+    }
+
+    /*store for next round*/
+    prevActValue = currentActValue;
+  }
+
+  /*check if scream of death: >2000ms */
+  if(onPulseInMs == 5000)   /*report scream once at 5 seconds, the counter will saturate at 10k*/
+  {
+    FbEvent_t fb = FB_SCREAM_OF_DEATH;
+    xQueueSendToBackFromISR(fbQueue, &fb, &xHigherPriorityTaskWoken);
+  }
+}
+
+#endif
+
+
+
+
 void beeperFollowerISR(void)
 {
-  /*a change is detected*/
+  /*a change is detected, just report it*/
+  beeperActivityDetected = true;    /*set flag*/
 }
 
 
