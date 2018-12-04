@@ -548,7 +548,10 @@ static FbEvent_t waitForFeedback(uint16_t maxWaitMs)
   if(pdTRUE == xQueueReceive(fbQueue, &fbEvent, maxWaitMs / portTICK_PERIOD_MS))
   {
     /*consume acks but feed back the scream of death so the control task can handle it*/
-    xQueueSendToBack(fbQueue, &fbEvent, 0);
+    if(fbEvent == FB_SCREAM_OF_DEATH)
+    {
+      xQueueSendToBack(fbQueue, &fbEvent, 0);
+    }
     return fbEvent;
   }
 
@@ -825,9 +828,10 @@ static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, ui
 
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
 
-  uint16_t basalRate = p1;
-  (void)basalRate;
-  (void)p2;
+  uint16_t newBasalRate = p1;   /**/
+  uint16_t timeInMinutes = p2;   /**/
+
+  bool needsToCancelTemporaryBasal = false;
   (void)p3;
 
 
@@ -839,8 +843,60 @@ static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, ui
   Serial.println(F(")."));
 
   //#endif
+  if(needsToCancelTemporaryBasal)
+  {
+    if(!treatmentTemporaryBasalStop(ctx, 0, 0, 0))
+    {
+      return false;
+    }
 
-  GO_TO_MENU_WITH_BUSY_CHECK();
+    /*activate menu again with home button*/
+    KEYPRESS_WITH_BUSY_CHECK(KEY_HOME, PRESS_SHORT);
+  }
+  else
+  {
+    /*start*/
+    GO_TO_MENU_WITH_BUSY_CHECK();
+  }
+
+  /*go 2 menu items down: set temporary basal*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+
+  /*clear current temp basal value to zero*/
+  for(uint16_t step=0; step < (20 * 5); step++)   /*needs 20 steps for one unit, estimating 5u/hr is our max temp basal*/
+  {
+    KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  }
+
+  /*set temporary basal*/
+  uint16_t stepsForTempBasal = newBasalRate / 5;
+  for(uint16_t step=0; step < stepsForTempBasal; step++)   /*needs 20 steps for one unit, estimating 5u/hr is our max temp basal. TODO*/
+  {
+    KEYPRESS_WITH_BUSY_CHECK(KEY_UP, PRESS_SHORT);
+  }
+
+  /*accept*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_F3, PRESS_SHORT);
+
+  /*clear current temp basal value to zero*/
+  for(uint16_t step=0; step < 10; step++)   /*1 step == 30min, this clears from up to 5 hr*/
+  {
+    KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  }
+
+  /*set time in half hours*/
+  uint16_t halfHours = timeInMinutes / 30;
+  for(uint16_t step=1; step < halfHours; step++)   /*starts from 0.5h anyway, so -1*/
+  {
+    KEYPRESS_WITH_BUSY_CHECK(KEY_UP, PRESS_SHORT);
+  }
+
+  /*accept*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_F3, PRESS_SHORT);
+
+  /*confirm*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
 
   
   //#if DEBUG_PRINT
@@ -874,22 +930,68 @@ static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, ui
       break;
   }
 
-
-
-
   return ret;
 }
 
 
 static bool treatmentTemporaryBasalStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3)
 {
-  /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
+  bool ret = false;
   (void)ctx;
+
+  /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
   (void)p1;
   (void)p2;
   (void)p3;
 
-  return true;
+  /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
+  GO_TO_MENU_WITH_BUSY_CHECK();
+
+  /*go 5 menu items down: Cancel*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+  KEYPRESS_WITH_BUSY_CHECK(KEY_DOWN, PRESS_SHORT);
+
+  /*accept*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_F3, PRESS_SHORT);
+
+  /*confirm*/
+  KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
+
+  //#if DEBUG_PRINT
+  Serial.println(F("waiting for feedback for stopping temp basal"));
+  //#endif
+
+  /*we should get positive feedback*/  
+  FbEvent_t fb = waitForFeedback(10000);
+
+  switch(fb)
+  {
+    case FB_POSITIVE_ACK:
+
+      #if DEBUG_PRINT
+      Serial.println(F("FB_POSITIVE_ACK"));
+      #endif
+
+      ret = true;
+      break;
+
+    case FB_NEGATIVE_ACK:
+      #if DEBUG_PRINT
+      Serial.println(F("FB_NEGATIVE_ACK"));
+      #endif
+      break;
+
+    default:
+      #if DEBUG_PRINT
+      Serial.println(F("failure"));
+      #endif
+      break;
+  }
+
+  return ret;
 }
 
 

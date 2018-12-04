@@ -1427,14 +1427,15 @@ Serial.println(F("min"));
         /*send if a response was created*/
         sendToAAPS(ctx, rawBuf, outLen);
 
-#if 0
+
+
         TreatmentMessage_t tr;
         tr.treatment = TREATMENT_TEMPORARY_BASAL_RATE_START;
         tr.param1 = newBasalRate;
-        tr.param2 = basalDuration;
+        tr.param2 = basalDurationMinutes;
         tr.param3 = 0;
         xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
-#endif
+
         /*mark ok*/
         ret = 0;
 
