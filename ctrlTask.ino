@@ -7,6 +7,31 @@
 #define MAX_KEY_EVENTS                4
 #define MAX_FB_EVENTS                 2
 
+#define SYSTEM_STATE_PULSE_NONE               0x00
+#define SYSTEM_STATE_PULSE_SHORT              0x01
+#define SYSTEM_STATE_PULSE_HALF               0x0F
+#define SYSTEM_STATE_PULSE_DOUBLE_SHORT       0x05
+
+#define SYSTEM_STATE_CLEARING_MASK_NIBBLE     0x0F
+#define SYSTEM_STATE_CLEARING_MASK_BYTE       0xFF
+
+#define SYSTEM_STATE_SHIFT_GLOBAL_STATE       (0*4)   
+#define SYSTEM_STATE_SHIFT_CONFIGURATION_MODE (1*4)   
+#define SYSTEM_STATE_SHIFT_NORMAL_BOLUS       (1*8)
+#define SYSTEM_STATE_SHIFT_EXTENDED_BOLUS     (2*8)
+#define SYSTEM_STATE_SHIFT_TEMP_BASAL         (3*8)
+
+
+typedef enum
+{
+  SYSTEM_STATE_PUMP_ACTIVE,      //not suspended
+  SYSTEM_STATE_BOLUS,
+  SYSTEM_STATE_TEMP_BASAL,
+  SYSTEM_STATE_EXTENDED_BOLUS,
+  SYSTEM_STATE_CONFIGURATION_MODE,
+} ledSystemState_t;
+
+
 #define KEY_PRESS_LENGTH_SHORT_IN_MS    130
 #define KEY_PRESS_LENGTH_LONG_IN_MS    1300
 
@@ -29,7 +54,7 @@ typedef enum
 
 #define FB_DEBOUNCING_TIME_MS         10
 
-
+static volatile uint32_t systemStateLedSecondValue;
 static volatile bool beeperActivityDetected = false;
 static bool userActive = false;
 static bool controlIsActive = false;
@@ -53,6 +78,9 @@ static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uin
 static bool treatmentExtendedBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
 static bool treatmentTemporaryBasalStop(OmniDanaContext_t *ctx, uint16_t p1, uint16_t p2, uint16_t p3);
+static void systemStateSet(ledSystemState_t state, bool active);
+static void systemStateUpdateLed();
+static void systemStateInitialize();
 
 
 static void fbISR(void);
@@ -70,6 +98,8 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
   Serial.print(F("portTICK_PERIOD_MS="));
   Serial.print(portTICK_PERIOD_MS, DEC);
   Serial.println(".");
+
+  systemStateInitialize();
 
   timer2SetUp();
 
@@ -105,6 +135,108 @@ void ctrlTaskInitialize(OmniDanaContext_t *ctx)
     Serial.println(F("xTaskCreate failed"));
   }
 }
+
+static void systemStateInitialize()
+{
+  systemStateSet(SYSTEM_STATE_PUMP_ACTIVE, true);
+  systemStateSet(SYSTEM_STATE_BOLUS, false);
+  systemStateSet(SYSTEM_STATE_TEMP_BASAL, false);
+  systemStateSet(SYSTEM_STATE_EXTENDED_BOLUS, false);
+  systemStateSet(SYSTEM_STATE_CONFIGURATION_MODE, false);
+}
+
+
+static void systemStateSet(ledSystemState_t state, bool active)
+{
+  uint32_t tmp;
+  uint32_t out = systemStateLedSecondValue;
+
+  /*
+    Output: 
+      64 bits, 100ms each, 6.4 seconds per repetition 
+        first 32 bits are always zero
+        the second 32 bits are divided into four segments as defined below
+
+
+    00  01  02  03  04  05  06  07  08  09  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31 
+    ----------- byte 0 -------------____________ byte 1 ____________------------ byte 2 ------------___________ byte 3 _____________  
+    ----------------________________----------------________________----------------________________----------------________________
+
+    ****                                                                                                                                  Pump Active (not suspended)
+    ****    ****                                                                                                                          Pump Not Active (suspended)
+
+                    ****    ****                                                                                                          Configuration Mode Active
+
+                                    
+                                    ****                                                                                                  Bolus Not Active
+                                    ****************                                                                                      Bolus Active
+                                    
+                                                                    ****                                                                  Temp Basal Not Active
+                                                                    ****************                                                      Temp Basal Active
+                                                                                                    
+                                                                                                    ****                                  Ext Bolus Not Active
+                                                                                                    ****************                      Ext Bolus Active
+  */
+
+
+  switch(state)
+  {
+    case SYSTEM_STATE_PUMP_ACTIVE:
+      tmp = (uint32_t)((active ? SYSTEM_STATE_PULSE_SHORT : SYSTEM_STATE_PULSE_DOUBLE_SHORT)) << SYSTEM_STATE_SHIFT_GLOBAL_STATE;
+      out &= ~(((uint32_t)SYSTEM_STATE_CLEARING_MASK_NIBBLE << SYSTEM_STATE_SHIFT_GLOBAL_STATE));
+      out |= tmp;
+      break;
+    case SYSTEM_STATE_BOLUS:
+      tmp = (uint32_t)((active ? SYSTEM_STATE_PULSE_HALF : SYSTEM_STATE_PULSE_SHORT)) << SYSTEM_STATE_SHIFT_NORMAL_BOLUS;
+      out &= ~(((uint32_t)SYSTEM_STATE_CLEARING_MASK_BYTE << SYSTEM_STATE_SHIFT_NORMAL_BOLUS));
+      out |= tmp;
+      break;
+    case SYSTEM_STATE_TEMP_BASAL:
+      tmp = (uint32_t)((active ? SYSTEM_STATE_PULSE_HALF : SYSTEM_STATE_PULSE_SHORT)) << SYSTEM_STATE_SHIFT_TEMP_BASAL;
+      out &= ~(((uint32_t)SYSTEM_STATE_CLEARING_MASK_BYTE << SYSTEM_STATE_SHIFT_TEMP_BASAL));
+      out |= tmp;
+      break;
+    case SYSTEM_STATE_EXTENDED_BOLUS:
+      tmp = (uint32_t)((active ? SYSTEM_STATE_PULSE_HALF : SYSTEM_STATE_PULSE_SHORT)) << SYSTEM_STATE_SHIFT_EXTENDED_BOLUS;
+      out &= ~(((uint32_t)SYSTEM_STATE_CLEARING_MASK_BYTE << SYSTEM_STATE_SHIFT_EXTENDED_BOLUS));
+      out |= tmp;
+      break;
+    case SYSTEM_STATE_CONFIGURATION_MODE:
+      tmp = (uint32_t)((active ? SYSTEM_STATE_PULSE_DOUBLE_SHORT : SYSTEM_STATE_PULSE_NONE)) << SYSTEM_STATE_SHIFT_CONFIGURATION_MODE;
+      out &= ~(((uint32_t)SYSTEM_STATE_CLEARING_MASK_NIBBLE << SYSTEM_STATE_SHIFT_CONFIGURATION_MODE));
+      out |= tmp;
+      break;
+    default:
+      break;
+  }
+
+  Serial.print(F("SystemState = "));
+  Serial.print(out, HEX);
+  Serial.println(F("."));
+
+  systemStateLedSecondValue = out;  /*latch to LED*/
+}
+
+static void systemStateUpdateLed()
+{
+  static uint8_t index = 0;
+  bool outBit = false;
+
+  /*first 32 bits are always zero, the second word is get from systemStateLedSecondValue*/
+  if(index > 31)
+  {
+    uint8_t shiftBits = index-32; /*gets 0...31*/
+    outBit = (systemStateLedSecondValue >> shiftBits) & 0x1; /*extract the desired bit*/
+  }
+
+  /*write value to led*/
+  digitalWrite(LED_BUILTIN, (outBit ? HIGH : LOW));
+
+  /*advance to next*/
+  index = (index + 1) % 64;
+
+} 
+
 
 static void checkUserKeypad()
 {
@@ -185,6 +317,9 @@ static void ctrlTaskTimerTick(TimerHandle_t xTimer)
   /*per each tick, let's see if the user keypad is busy*/
   checkUserKeypad();
 
+  /*update LED with the state information*/
+  systemStateUpdateLed();
+
   if(tickCounter-- == 0)
   {
     tickCounter = TASK_TICK_RELOAD_VALUE;
@@ -220,7 +355,7 @@ static void fbISR(void)
     return;
   }
 
-  digitalWrite(LED_BUILTIN, fbVal); //HIGH
+  //digitalWrite(LED_BUILTIN, fbVal); //HIGH
 
   /*act only when the state has been changed*/
   if(fbVal != lastActionState)
@@ -415,6 +550,89 @@ static void fbISR(void)
 #endif
 
 
+typedef enum
+{
+  CONF_MODE_NONE = 0,
+  CONF_MODE_INSULIN_RESERVOIR,
+} confMode_t;
+
+
+#define CONF_PUMP_MAX_UNITS   200
+#define CONF_PUMP_MIN_UNITS   0
+#define CONF_PUMP_STEP        10
+
+#define CONF_TIMEOUT_MS       5000
+
+
+static bool processKeyEvent(OmniDanaContext_t *ctx, KeyEvent_t *ev)
+{
+  static uint32_t lastActivityTimestamp = 0;
+  static confMode_t activeConfigurationMode = CONF_MODE_NONE;
+  uint16_t tmp;
+  uint32_t nowMs = millis();
+
+  switch(ev->key)
+  {
+    case KEY_F1:
+      activeConfigurationMode = (ev->active ? CONF_MODE_INSULIN_RESERVOIR : CONF_MODE_NONE);
+      break;
+    case KEY_F2:
+      break;
+    case KEY_F3:
+      break;
+    case KEY_HOME:
+      break;
+    case KEY_UP:
+      if(ev->active)
+      {
+        switch(activeConfigurationMode)
+        {
+          case CONF_MODE_INSULIN_RESERVOIR:
+            tmp = ctx->pump.reservoirRemainingUnits;
+            ctx->pump.reservoirRemainingUnits = (tmp > (CONF_PUMP_MAX_UNITS - CONF_PUMP_STEP) ? CONF_PUMP_MAX_UNITS : tmp + CONF_PUMP_STEP);
+            break;
+          default:
+            break;
+        }
+      }
+
+      break;
+    case KEY_DOWN:
+      if(ev->active)
+      {
+        switch(activeConfigurationMode)
+        {
+          case CONF_MODE_INSULIN_RESERVOIR:
+            tmp = ctx->pump.reservoirRemainingUnits;
+            ctx->pump.reservoirRemainingUnits = (tmp < (CONF_PUMP_MIN_UNITS + CONF_PUMP_STEP) ? CONF_PUMP_MIN_UNITS : tmp - CONF_PUMP_STEP);
+            break;
+          default:
+            break;
+        }
+      }
+      break;
+    case KEY_QUESTIONMARK:
+      break;
+
+    default:
+      break;
+  }
+
+  if((nowMs - lastActivityTimestamp) > CONF_TIMEOUT_MS)
+  {
+    activeConfigurationMode = CONF_MODE_NONE;
+  }
+  
+  /*store this timestamp*/
+  lastActivityTimestamp = nowMs;
+
+  bool inConfigMode = (activeConfigurationMode != CONF_MODE_NONE);
+
+  systemStateSet(SYSTEM_STATE_CONFIGURATION_MODE, inConfigMode);
+
+  return inConfigMode;
+}
+
 
 
 void beeperFollowerISR(void)
@@ -460,6 +678,9 @@ static void ctrlTask(void *pvParameters)
       Serial.print(", act=");
       Serial.print(keyEvent.active, DEC);
       Serial.println(".");
+
+
+      processKeyEvent(ctx, &keyEvent);
     }
 
     if(pdTRUE == xQueueReceive(fbQueue, &fbEvent, 0))
@@ -703,6 +924,8 @@ static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uin
   //#if DEBUG_PRINT
   Serial.println(F("treatmentExtendedBolusStart"));
   //#endif
+  
+  systemStateSet(SYSTEM_STATE_EXTENDED_BOLUS, true);
 
 
   GO_TO_MENU_WITH_BUSY_CHECK();
@@ -746,7 +969,9 @@ static bool treatmentExtendedBolusStart(OmniDanaContext_t *ctx, uint16_t p1, uin
 
   /*confirm*/
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
-  
+
+
+
   /*we should get positive feedback*/  
   FbEvent_t fb = waitForFeedback(10000);
 
@@ -785,6 +1010,10 @@ static bool treatmentExtendedBolusStop(OmniDanaContext_t *ctx, uint16_t p1, uint
   (void)p1;
   (void)p2;
   (void)p3;
+
+
+  systemStateSet(SYSTEM_STATE_EXTENDED_BOLUS, false);
+
 
   return true;
 }
@@ -841,6 +1070,8 @@ static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, ui
   Serial.print(F(","));
   Serial.print(p2, DEC);
   Serial.println(F(")."));
+
+  systemStateSet(SYSTEM_STATE_TEMP_BASAL, true);
 
   //#endif
   if(needsToCancelTemporaryBasal)
@@ -899,6 +1130,8 @@ static bool treatmentTemporaryBasalStart(OmniDanaContext_t *ctx, uint16_t p1, ui
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
 
   
+
+
   //#if DEBUG_PRINT
   Serial.println(F("waiting for feedback"));
   //#endif
@@ -943,6 +1176,10 @@ static bool treatmentTemporaryBasalStop(OmniDanaContext_t *ctx, uint16_t p1, uin
   (void)p1;
   (void)p2;
   (void)p3;
+  //#if DEBUG_PRINT
+  Serial.println(F("treatmentTemporaryBasalStop()"));
+
+  systemStateSet(SYSTEM_STATE_TEMP_BASAL, false);
 
   /*Returns false in case of failure (i.e. user keypad activity or if feedback was negative).*/
   GO_TO_MENU_WITH_BUSY_CHECK();
@@ -959,6 +1196,8 @@ static bool treatmentTemporaryBasalStop(OmniDanaContext_t *ctx, uint16_t p1, uin
 
   /*confirm*/
   KEYPRESS_WITH_BUSY_CHECK(KEY_F2, PRESS_SHORT);
+
+
 
   //#if DEBUG_PRINT
   Serial.println(F("waiting for feedback for stopping temp basal"));

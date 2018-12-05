@@ -1469,19 +1469,27 @@ Serial.println(F("min"));
 #if DEBUG_PRINT
       Serial.println(F("handleTypeResponse: OBA_CANCEL_TEMPORARY_BASAL"));
 #endif
-      ctx->pump.isTempBasalInProgress = 0;
-      ctx->pump.tempBasalStopTime = now();
+      {
+        ctx->pump.isTempBasalInProgress = 0;
+        ctx->pump.tempBasalStopTime = now();
 
-      msgPutU8(&msgPtr, 0); //OK
+        msgPutU8(&msgPtr, 0); //OK
 
-      outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_CANCEL_TEMPORARY_BASAL, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
+        outLen = createOutMessage(rawBuf, TYPE_RESPONSE, OBA_CANCEL_TEMPORARY_BASAL, NULL, msgLen(tempBuf, msgPtr)); /*0=OK, no need to request again*/
 
-      /*send if a response was created*/
-      sendToAAPS(ctx, rawBuf, outLen);
+        /*send if a response was created*/
+        sendToAAPS(ctx, rawBuf, outLen);
 
-      /*mark ok*/
-      ret = 0;
+        TreatmentMessage_t tr;
+        tr.treatment = TREATMENT_TEMPORARY_BASAL_RATE_STOP;
+        tr.param1 = 0;
+        tr.param2 = 0;
+        tr.param3 = 0;
+        xMessageBufferSend(ctx->commToCtrlBuffer, &tr, sizeof(TreatmentMessage_t), 0);
 
+        /*mark ok*/
+        ret = 0;
+      }
 
       break;
 

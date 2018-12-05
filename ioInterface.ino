@@ -1,6 +1,6 @@
 #include "ioInterface.h"
 
-static void setupFeedbackPin(feedbackKey_t fb);
+static void setupFeedbackPin(feedbackKey_t fb, void (*fbFun)(void));
 static void setupButtonPin(buttonKey_t key);
 static void setPinState(uint8_t ioPin, pinState_t state);
 
